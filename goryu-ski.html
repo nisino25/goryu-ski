@@ -232,13 +232,17 @@
         <span>振動（ターン・漕ぐ・ネット）<span class="block text-[11px] text-white/50">Androidは常時。iPhoneは iOS 18以降・タップ時のみ</span></span>
         <input id="haptics" type="checkbox" class="w-5 h-5 accent-[color:var(--gold)]" :checked="hapticsOn" @change="toggleHaptics($event.target.checked)">
       </label>
+      <label for="sound" class="flex items-center justify-between rounded-lg border border-white/15 px-3 py-2.5 text-[13px]">
+        <span>効果音（板の音・ストック・旗門）</span>
+        <input id="sound" type="checkbox" class="w-5 h-5 accent-[color:var(--gold)]" :checked="soundOn" @change="toggleSound($event.target.checked)">
+      </label>
       <div class="flex items-center gap-3 -mt-2">
         <button @click="testHaptics" class="rounded-lg px-3 py-2 text-[13px] font-bold bg-white/10">振動テスト</button>
         <span class="text-[11px] text-white/60 leading-snug">{{ hapticsNote }}</span>
       </div>
       <div class="text-[11px] leading-relaxed text-white/50 flex flex-col gap-1">
         <p>距離・標高差・最大斜度は実地形での実測値。看板の「公式」値はエイブル白馬五竜のコースガイドより。コース線はOpenStreetMapのデータをつないだもので、区間の境目はおおよそです。PCは ← / → キー（左足 / 右足）、↓ でブレーキ、↑ で漕いで加速。</p>
-        <p>出典：標高 国土地理院（数値標高モデル）／ コース・リフト © OpenStreetMap contributors (ODbL)／ スキーヤー「Skier」by apelab・リフト「Chairlift」「Ski lift pole」by Poly by Google, CC-BY 3.0 (Poly Pizza)／ 雪テクスチャ Poly Haven (CC0)</p>
+        <p>出典：標高 国土地理院（数値標高モデル）／ コース・リフト © OpenStreetMap contributors (ODbL)／ リフト「Chairlift」「Ski lift pole」by Poly by Google, CC-BY 3.0 (Poly Pizza)／ 雪テクスチャ Poly Haven (CC0)</p>
       </div>
     </div>
   </div>
@@ -377,30 +381,186 @@ class Route {
 
 /* ================= サウンド ================= */
 class Sfx {
+  // すべてWeb Audioで合成：滑走音・カービング・ずれ／ハの字のガリガリ・風＋単発の効果音
   init() {
     if (this.ctx) { this.ctx.resume?.(); return; }
     try {
       const ctx = this.ctx = new (window.AudioContext || window.webkitAudioContext)();
       const buf = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate);
       const d = buf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
-      const mk = (type, freq, q) => {
-        const src = ctx.createBufferSource(); src.buffer = buf; src.loop = true;
+      this.noise = buf;
+      this.master = ctx.createGain(); this.master.gain.value = this.muted ? 0 : 0.9; this.master.connect(ctx.destination);
+      const mk = (type, freq, q, dest) => {
+        const src = ctx.createBufferSource(); src.buffer = buf; src.loop = true; src.playbackRate.value = 0.8 + Math.random() * 0.4;
         const f = ctx.createBiquadFilter(); f.type = type; f.frequency.value = freq; f.Q.value = q;
         const g = ctx.createGain(); g.gain.value = 0;
-        src.connect(f); f.connect(g); g.connect(ctx.destination); src.start();
+        src.connect(f); f.connect(g); g.connect(dest || this.master); src.start();
         return { f, g };
       };
       this.wind = mk('lowpass', 400, 0.7);
-      this.carve = mk('bandpass', 2200, 1.2);
+      this.glide = mk('bandpass', 1400, 0.5);        // 板が雪面をすべる「シャーッ」
+      this.carve = mk('bandpass', 2600, 3.5);        // エッジが雪を削る鋭い音
+      // ずれ・ハの字：高域ノイズを細かく震わせてガリガリ感を出す
+      this.skidAM = ctx.createGain(); this.skidAM.gain.value = 0.5; this.skidAM.connect(this.master);
+      this.skid = mk('highpass', 1100, 0.7, this.skidAM);
+      const lfo = ctx.createOscillator(); lfo.type = 'square'; lfo.frequency.value = 32;
+      const lfoG = ctx.createGain(); lfoG.gain.value = 0.5; lfo.connect(lfoG); lfoG.connect(this.skidAM.gain); lfo.start();
+      this.lfo = lfo;
     } catch (e) { this.ctx = null; }
   }
-  update(v, edge, active) {
+  setMuted(m) { this.muted = m; if (this.master) this.master.gain.setTargetAtTime(m ? 0 : 0.9, this.ctx.currentTime, 0.05); }
+  update(v, edge, skid, plow, active) {
     if (!this.ctx) return;
-    const t = this.ctx.currentTime, vv = active ? v : 0;
-    this.wind.g.gain.setTargetAtTime(Math.min(0.42, Math.pow(vv / 30, 1.5) * 0.36), t, 0.1);
-    this.wind.f.frequency.setTargetAtTime(250 + vv * 45, t, 0.1);
-    this.carve.g.gain.setTargetAtTime(active ? Math.min(0.2, Math.abs(edge) * vv / 25 * 0.2) : 0, t, 0.06);
-    this.carve.f.frequency.setTargetAtTime(1500 + vv * 60, t, 0.1);
+    const t = this.ctx.currentTime, vv = active ? v : 0, ae = Math.abs(edge), sp = Math.min(1, vv / 18);
+    this.wind.g.gain.setTargetAtTime(Math.min(0.32, Math.pow(vv / 30, 1.5) * 0.28), t, 0.1);
+    this.wind.f.frequency.setTargetAtTime(250 + vv * 40, t, 0.1);
+    this.glide.g.gain.setTargetAtTime(active ? sp * 0.1 * (1 - ae * 0.5) : 0, t, 0.08);
+    this.glide.f.frequency.setTargetAtTime(900 + vv * 45, t, 0.1);
+    this.carve.g.gain.setTargetAtTime(active ? Math.pow(ae, 1.4) * sp * 0.2 : 0, t, 0.05);
+    this.carve.f.frequency.setTargetAtTime(1800 + ae * 1600 + vv * 25, t, 0.08);
+    const sk = active ? Math.min(0.32, skid * 0.35 + plow * Math.min(1, vv / 10) * 0.25) : 0;
+    this.skid.g.gain.setTargetAtTime(sk, t, 0.05);
+    this.lfo.frequency.setTargetAtTime(24 + vv * 1.2, t, 0.1);
+  }
+  // 単発の効果音
+  blip(type) {
+    const ctx = this.ctx; if (!ctx || this.muted) return;
+    const t = ctx.currentTime;
+    const env = (g, peak, dur) => { g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(peak, t + 0.006); g.gain.exponentialRampToValueAtTime(0.0001, t + dur); };
+    const noise = (ftype, freq, q, peak, dur, freq2) => {
+      const s = ctx.createBufferSource(); s.buffer = this.noise; s.playbackRate.value = 1 + Math.random() * 0.3;
+      const f = ctx.createBiquadFilter(); f.type = ftype; f.frequency.setValueAtTime(freq, t); f.Q.value = q;
+      if (freq2) f.frequency.exponentialRampToValueAtTime(freq2, t + dur);
+      const g = ctx.createGain(); env(g, peak, dur);
+      s.connect(f); f.connect(g); g.connect(this.master); s.start(t, Math.random()); s.stop(t + dur + 0.05);
+    };
+    const tone = (wave, freq, peak, dur, at = 0, freq2) => {
+      const o = ctx.createOscillator(); o.type = wave; o.frequency.setValueAtTime(freq, t + at);
+      if (freq2) o.frequency.exponentialRampToValueAtTime(freq2, t + at + dur);
+      const g = ctx.createGain(); g.gain.setValueAtTime(0.0001, t + at); g.gain.exponentialRampToValueAtTime(peak, t + at + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t + at + dur);
+      o.connect(g); g.connect(this.master); o.start(t + at); o.stop(t + at + dur + 0.05);
+    };
+    if (type === 'plant') { noise('highpass', 2600, 0.8, 0.22, 0.05); tone('triangle', 520, 0.05, 0.05); }       // ストックが雪に刺さる
+    else if (type === 'swoosh') noise('bandpass', 700, 1.2, 0.16, 0.28, 2600);                                    // 切り替えのシュッ
+    else if (type === 'push') { noise('highpass', 2200, 0.8, 0.2, 0.06); noise('bandpass', 600, 1, 0.12, 0.22, 1800); }
+    else if (type === 'gate') { tone('sine', 1320, 0.1, 0.09); tone('sine', 1760, 0.08, 0.12, 0.07); }
+    else if (type === 'miss') tone('square', 190, 0.08, 0.22, 0, 140);
+    else if (type === 'thud') { tone('sine', 110, 0.5, 0.25, 0, 55); noise('lowpass', 500, 0.7, 0.3, 0.2); }       // ネットにぶつかる
+    else if (type === 'clack') { tone('square', 150, 0.08, 0.06); noise('bandpass', 700, 2, 0.2, 0.08); tone('square', 120, 0.07, 0.06, 0.09); noise('bandpass', 650, 2, 0.16, 0.08); }   // 支柱の滑車を通過するガタンゴトン
+    else if (type === 'land') noise('lowpass', 900, 0.7, 0.3, 0.18);
+    else if (type === 'finish') { tone('sine', 880, 0.14, 0.25); tone('sine', 1175, 0.14, 0.25, 0.14); tone('sine', 1760, 0.12, 0.5, 0.28); }
+  }
+}
+
+/* ================= 関節付きスキーヤー ================= */
+// 骨組み（腰・胴・頭・腕・脚・板・ストック）を毎フレーム計算して配置する。脚と腕は2関節IK（足は常に雪面に着く）
+class SkierRig {
+  constructor() {
+    const g = this.group = new THREE.Group();
+    const M = (c) => new THREE.MeshLambertMaterial({ color: c });
+    const mat = this.mat = { jacket: M(0xE03A3E), stripe: M(0xf2f4f7), pants: M(0x1b2b3c), boot: M(0xeef1f4), buckle: M(0x2b2f36), glove: M(0x1f2328),
+      helmet: M(0xf5f7fa), goggle: M(0xF2C230), lens: M(0x2b3a4a), ski: M(0xF2C230), skiTop: M(0x15171a), pole: M(0x3a3f46), basket: M(0x15171a) };
+    const cylG = (r0, r1, seg = 10) => { const q = new THREE.CylinderGeometry(r1, r0, 1, seg); q.translate(0, 0.5, 0); return q; };
+    const add = (geo, m) => { const o = new THREE.Mesh(geo, m); o.castShadow = true; g.add(o); return o; };
+    const ball = (r, m) => add(new THREE.SphereGeometry(r, 12, 9), m);
+    this.Y = new THREE.Vector3(0, 1, 0);
+    this.side = {};
+    for (const s of [-1, 1]) {
+      const o = this.side[s] = {};
+      o.thigh = add(cylG(0.085, 0.068), mat.pants); o.knee = ball(0.07, mat.pants);
+      o.shin = add(cylG(0.066, 0.056), mat.pants);
+      o.foot = new THREE.Group(); g.add(o.foot);
+      const boot = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.2, 0.31), mat.boot); boot.position.set(0, 0.1, 0.01); boot.castShadow = true; o.foot.add(boot);
+      for (const by of [0.08, 0.15]) { const b = new THREE.Mesh(new THREE.BoxGeometry(0.135, 0.025, 0.05), mat.buckle); b.position.set(0, by, -0.08); o.foot.add(b); }
+      const ski = new THREE.Mesh(new THREE.BoxGeometry(0.095, 0.022, 1.72), mat.ski); ski.position.set(0, -0.005, -0.04); ski.castShadow = true; o.foot.add(ski);
+      const top = new THREE.Mesh(new THREE.BoxGeometry(0.097, 0.024, 1.1), mat.skiTop); top.position.set(0, -0.003, 0.05); o.foot.add(top);
+      const tip = new THREE.Mesh(new THREE.BoxGeometry(0.095, 0.022, 0.16), mat.ski); tip.position.set(0, 0.03, -0.96); tip.rotation.x = 0.45; o.foot.add(tip);
+      o.upper = add(cylG(0.056, 0.05), mat.jacket); o.elbow = ball(0.052, mat.jacket);
+      o.fore = add(cylG(0.05, 0.044), mat.jacket); o.hand = ball(0.05, mat.glove);
+      o.pole = add(cylG(0.011, 0.011, 6), mat.pole);
+      o.basket = add(new THREE.CylinderGeometry(0.05, 0.05, 0.012, 10), mat.basket);
+      o.plant = 0;   // ストックを突く動きの進み具合（0〜1）
+    }
+    this.pelvis = add(new THREE.BoxGeometry(0.28, 0.14, 0.19), mat.pants);
+    this.torso = add(cylG(0.16, 0.185, 12), mat.jacket);
+    this.band = add(cylG(0.178, 0.188, 12), mat.stripe);
+    this.shoulders = add(new THREE.CylinderGeometry(0.08, 0.08, 0.46, 10), mat.jacket);
+    this.head = ball(0.125, mat.helmet);
+    this.goggle = add(new THREE.BoxGeometry(0.2, 0.065, 0.06), mat.goggle);
+    this.lens = add(new THREE.BoxGeometry(0.17, 0.045, 0.02), mat.lens);
+    this.v = {}; for (const k of ['pel', 'dir', 'rt', 'neck', 'chest', 'hip', 'ank', 'knee', 'sh', 'hand', 'elb', 'tip', 'a', 'b', 'c', 'hint']) this.v[k] = new THREE.Vector3();
+    this.pose = { lean: 0, flex: 0.2, tuck: 0, plow: 0, push: 0, sit: 0 };
+  }
+  place(mesh, a, b) {
+    const d = this.v.c.subVectors(b, a), len = d.length() || 1e-4;
+    mesh.position.copy(a); mesh.quaternion.setFromUnitVectors(this.Y, d.multiplyScalar(1 / len)); mesh.scale.set(1, len, 1);
+  }
+  // 2関節IK：根元aから先端bへ、長さL1,L2。曲がる向きのヒントhint。結果の関節位置をoutへ
+  ik(a, b, L1, L2, hint, out) {
+    const d = this.v.a.subVectors(b, a); let dist = d.length();
+    const maxL = (L1 + L2) * 0.999; if (dist > maxL) { d.multiplyScalar(maxL / dist); b.copy(a).add(d); dist = maxL; }
+    d.normalize();
+    const along = (L1 * L1 - L2 * L2 + dist * dist) / (2 * dist), hgt = Math.sqrt(Math.max(0, L1 * L1 - along * along));
+    const bend = this.v.b.copy(hint).addScaledVector(d, -hint.dot(d)).normalize();
+    return out.copy(a).addScaledVector(d, along).addScaledVector(bend, hgt);
+  }
+  plant(side) { this.side[side].plant = 0.001; }
+  update(dt) {
+    const P = this.pose, V = this.v, sit = P.sit;
+    const flexE = clamp(P.flex * 0.65 + P.tuck * 0.55 + P.push * 0.25, 0, 1);
+    const lean = P.lean * (1 - sit);
+    // 腰：沈み込み＋ターン内側へ移動（足は雪面に残る＝内傾）
+    const Ph = 0.97 - flexE * 0.33;
+    V.pel.set(-Math.sin(lean) * Ph * 0.8, Ph * Math.cos(lean * 0.85), 0.08 + P.tuck * 0.14);
+    const sitPel = V.a.set(0, 0.62, 0.05); V.pel.lerp(sitPel, sit);
+    // 胴：前傾＋外傾（上体は脚ほど倒れない）
+    const a = (0.28 + flexE * 0.25 + P.tuck * 0.7 + P.push * 0.55) * (1 - sit) + (-0.12) * sit;
+    const roll = lean * 0.35;
+    V.dir.set(-Math.sin(roll) * Math.cos(a), Math.cos(roll) * Math.cos(a), -Math.sin(a)).normalize();
+    V.rt.set(Math.cos(roll), Math.sin(roll), 0);
+    V.chest.copy(V.pel).addScaledVector(V.dir, 0.5);
+    V.neck.copy(V.pel).addScaledVector(V.dir, 0.58);
+    this.pelvis.position.copy(V.pel).addScaledVector(V.dir, 0.02); this.pelvis.position.y -= 0.03; this.pelvis.quaternion.setFromUnitVectors(this.Y, V.dir);
+    this.place(this.torso, V.pel, V.chest);
+    V.b.copy(V.pel).addScaledVector(V.dir, 0.3); V.c.copy(V.pel).addScaledVector(V.dir, 0.36);
+    this.place(this.band, V.b.clone(), V.c.clone());
+    this.shoulders.position.copy(V.chest); this.shoulders.quaternion.setFromUnitVectors(this.Y, V.rt);
+    this.head.position.copy(V.neck).add(V.a.set(0, 0.13, -0.02 - P.tuck * 0.06));
+    this.goggle.position.copy(this.head.position).add(V.a.set(0, 0.0, -0.1)); this.goggle.rotation.set(0, 0, roll * 0.5);
+    this.lens.position.copy(this.head.position).add(V.a.set(0, 0.0, -0.132)); this.lens.rotation.copy(this.goggle.rotation);
+    const w = 0.13 + P.plow * 0.22 * (1 - sit);
+    for (const s of [-1, 1]) {
+      const o = this.side[s];
+      const inside = (lean > 0 && s < 0) || (lean < 0 && s > 0);
+      // 足首（雪面上）。内足は少し前に
+      V.ank.set(s * w, 0.13, 0.02 + (inside ? -0.08 * Math.min(1, Math.abs(lean) * 2) : 0));
+      V.a.set(s * 0.14, V.pel.y - 0.5, -0.36); V.ank.lerp(V.a, sit);
+      V.hip.copy(V.pel).addScaledVector(V.rt, s * 0.1); V.hip.y -= 0.06;
+      V.hint.set(0, 0.15, -1).normalize();
+      const ank = V.ank.clone();
+      this.ik(V.hip, ank, 0.46, 0.45, V.hint, V.knee);
+      this.place(o.thigh, V.hip, V.knee); o.knee.position.copy(V.knee); this.place(o.shin, V.knee, ank);
+      o.foot.position.set(ank.x, ank.y - 0.13, ank.z);
+      o.foot.rotation.set(-0.3 * sit, s * 0.32 * P.plow * (1 - sit), lean * 0.9, 'YXZ');   // ハの字：板の先を内側へ
+      // 腕とストック
+      V.sh.copy(V.chest).addScaledVector(V.rt, s * 0.21);
+      if (o.plant > 0) { o.plant += dt / 0.38; if (o.plant >= 1) o.plant = 0; }
+      const pl = o.plant > 0 ? Math.sin(Math.PI * o.plant) : 0;
+      V.hand.copy(V.sh).add(V.a.set(s * 0.13, -0.33 + P.tuck * 0.12, -0.3 - P.tuck * 0.12));
+      V.hand.add(V.a.set(s * 0.03 * pl, -0.08 * pl, -0.2 * pl));
+      if (P.push > 0) V.hand.add(V.a.set(0, 0.05 * P.push, -0.25 * P.push));
+      V.a.copy(V.pel).addScaledVector(V.rt, s * 0.24).add(V.b.set(0, 0.02, -0.3)); V.hand.lerp(V.a, sit);
+      this.ik(V.sh, V.hand, 0.3, 0.28, V.hint.set(s * 0.8, -0.2, 0.6).normalize(), V.elb);
+      this.place(o.upper, V.sh, V.elb); o.elbow.position.copy(V.elb); this.place(o.fore, V.elb, V.hand); o.hand.position.copy(V.hand);
+      // ストックの先：普段は後ろへ流す、突くときは足の前の雪面、漕ぐときは足の横〜後ろ
+      V.tip.copy(V.hand).add(V.a.set(s * 0.12, -1.0, 0.5).normalize().multiplyScalar(1.15));
+      if (pl > 0) V.tip.lerp(V.a.set(V.hand.x + s * 0.12, 0.02, V.hand.z - 0.25), Math.min(1, pl * 1.6));
+      if (P.push > 0) V.tip.lerp(V.a.set(V.hand.x + s * 0.1, 0.02, V.hand.z + 0.55), P.push);
+      V.a.copy(V.hand).add(V.b.set(0, -1.1, 0.05)); V.tip.lerp(V.a, sit);
+      V.tip.sub(V.hand).normalize().multiplyScalar(1.15).add(V.hand);
+      this.place(o.pole, V.hand, V.tip);
+      o.basket.position.copy(V.hand).lerp(V.tip, 0.92);
+    }
   }
 }
 
@@ -533,7 +693,7 @@ class Engine {
     };
 
     this.buildFar(); this.buildNear(); this.buildTrees(); this.buildLifts();
-    this.makeSkier(assets.skier); this.makeParticles(); this.makeFlakes();
+    this.makeSkier(); this.makeParticles(); this.makeFlakes();
     this.fx = document.getElementById('fx'); this.fxg = this.fx.getContext('2d');
     this.lines = Array.from({ length: 36 }, () => this.newLine(true));
     this.routeGroup = new THREE.Group(); scene.add(this.routeGroup);
@@ -835,7 +995,7 @@ class Engine {
     geo.computeBoundingBox();
     const sc = 2.1 / (geo.boundingBox.max.x - geo.boundingBox.min.x);   // 4人掛けの幅 ≒ 2.1m
     geo.scale(sc, sc, sc);
-    this.seatDrop = H * sc * 0.82 + 0.75;           // ケーブルから座面までの距離 + 腰の高さ分
+    this.seatDrop = H * sc * 0.82 + 0.54;           // ケーブルから座面までの距離 + 座った腰の高さ分
     // 座面中心の前後位置（吊り手の真下からのずれ）
     const off = new THREE.Vector3(sx - ax, 0, sz - az).applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw).multiplyScalar(sc);
     this.seatFwd = -off.z;
@@ -866,42 +1026,12 @@ class Engine {
     this.gMesh.instanceMatrix.needsUpdate = true; this.cMesh.instanceMatrix.needsUpdate = true;
   }
 
-  /* ---------- スキーヤー（3Dモデル） ---------- */
-  makeSkier(gltf) {
+  /* ---------- スキーヤー（関節付きリグ） ---------- */
+  makeSkier() {
     const root = this.skier = new THREE.Group();
-    const lean = this.leanG = new THREE.Group(); root.add(lean);
-    const model = gltf.scene;
-    model.traverse(o => { if (o.isMesh) { o.castShadow = true; if (o.material) o.material.side = THREE.FrontSide; } });
-    // 板の向きを進行方向(-z)へ合わせ、足元を原点に
-    const holder = new THREE.Group(); holder.add(model);
-    holder.quaternion.setFromUnitVectors(new THREE.Vector3(...SKIER_FIX.tip).normalize(), new THREE.Vector3(0, 0, -1));
-    holder.rotateOnWorldAxis(new THREE.Vector3(0, 0, 1), SKIER_FIX.roll);
-    holder.updateMatrixWorld(true);
-    // 回転後の頂点で正確に測る（Box3.setFromObject は回転した外接箱で膨らむため使わない）
-    const box = new THREE.Box3(), v = new THREE.Vector3();
-    model.traverse(o => {
-      if (!o.isMesh) return;
-      const p = o.geometry.attributes.position;
-      for (let i = 0; i < p.count; i++) box.expandByPoint(v.fromBufferAttribute(p, i).applyMatrix4(o.matrixWorld));
-    });
-    const size = box.getSize(new THREE.Vector3());
-    const sc = 1.85 / size.z;   // 板の長さ（元モデルの最長寸法）を 1.85m に
-    const wrap = new THREE.Group(); wrap.add(holder); wrap.scale.setScalar(sc);
-    const c = box.getCenter(new THREE.Vector3());
-    holder.position.set(-c.x, -box.min.y, -c.z);
-    // 座り姿勢用：腰を支点に体ごと後ろへ起こす（モデルに骨が無いため全身の回転で表現）
-    const sitG = this.sitG = new THREE.Group(), sitIn = new THREE.Group();
-    sitG.add(sitIn); sitIn.add(wrap); lean.add(sitG);
-    {
-      // 腰の位置：高さ 45〜60% の帯で最も後ろ(+z)にある点の少し前
-      wrap.updateMatrixWorld(true); lean.updateMatrixWorld(true);
-      const inv = new THREE.Matrix4().copy(lean.matrixWorld).invert(), v2 = new THREE.Vector3();
-      let hz = -Infinity;
-      model.traverse(o => { if (!o.isMesh) return; const p = o.geometry.attributes.position;
-        for (let i = 0; i < p.count; i += 2) { v2.fromBufferAttribute(p, i).applyMatrix4(o.matrixWorld).applyMatrix4(inv); if (v2.y > 0.45 * 1.36 && v2.y < 0.6 * 1.36 && v2.z > hz) hz = v2.z; } });
-      this.hip = new THREE.Vector3(0, 0.55 * 1.36, (isFinite(hz) ? hz : 0.2) - 0.15);
-      sitG.position.copy(this.hip); sitIn.position.copy(this.hip).negate();
-    }
+    this.rig = new SkierRig(); root.add(this.rig.group);
+    this.leanG = this.rig.group;   // 互換用（回転は使わない）
+    this.rig.update(0);
     // 接地影（板の下の柔らかい影）：足元が雪に接している感じを出す
     const sh = document.createElement('canvas'); sh.width = sh.height = 64;
     const sg = sh.getContext('2d'), rg = sg.createRadialGradient(32, 32, 2, 32, 32, 31);
@@ -911,7 +1041,6 @@ class Engine {
     contact.rotation.x = -Math.PI / 2; contact.position.y = 0.02;
     root.add(contact); this.contact = contact;
     this.scene.add(root);
-    this.skierSize = size.clone().multiplyScalar(sc);
   }
   makeParticles() {
     const n = this.pN = 260;
@@ -1155,7 +1284,7 @@ class Engine {
     for (const g of this.gates || []) g.state = 0;
     this.mapYaw = undefined;
     this.skier.visible = true; if (this.contact) this.contact.visible = true;
-    this.chairAway = false; this.dropT = undefined; this.sitAmt = 0; if (this.sitG) this.sitG.rotation.x = 0;
+    this.chairAway = false; this.dropT = undefined; this.sitAmt = 0; if (this.rig) Object.assign(this.rig.pose, { sit: 0, lean: 0, flex: 0.15, tuck: 0, plow: 0, push: 0 });
     if (this.rideChair) this.rideChair.visible = this.rideCabin.visible = false;
   }
   startRun() {
@@ -1173,7 +1302,9 @@ class Engine {
   updateLiftState(dt) {
     const c = this.lift.cable;
     let remain = c.len - this.liftD;
+    const d0 = this.liftD;
     this.liftD += (remain > 14 ? 7 : 3) * dt;
+    for (let i = 1; i < c.cum.length - 1; i++) if (d0 < c.cum[i] && this.liftD >= c.cum[i]) this.sfx.blip('clack');
     remain = c.len - this.liftD;
     if (remain <= 0.4) {
       this.liftD = c.len - 25; this.liftPhase = 'ride';
@@ -1207,7 +1338,7 @@ class Engine {
     this.chairAway = false; this.rideChair.visible = this.rideCabin.visible = false;   // 降りたら乗っていた搬器は消す（カメラをふさがない）
     this.skier.visible = true; this.contact.visible = true;
     this.camYaw = h;
-    this.mode = 'run';
+    this.mode = 'run'; this.sfx.blip('land');
     this.cb.lift({ active: false, phase: '' });
     this.cb.go();
   }
@@ -1215,7 +1346,7 @@ class Engine {
   push() {
     const st = this.st;
     if (this.mode !== 'run' || this.paused || !st || st.finished || (this.pushCd || 0) > 0) return false;
-    this.pushCd = 0.3; this.pushT = 0;
+    this.pushCd = 0.3; this.pushT = 0; this.sfx.blip('push');
     st.v += 2.5 * Math.max(0.15, 1 - st.v / 14);   // 止まっていると +9km/h、40km/h超では +1.3km/h 程度
     return true;
   }
@@ -1239,8 +1370,8 @@ class Engine {
     this.skier.position.set(P.x + dx * f, P.y - this.seatDrop, P.z + dz * f);
     const sway = Math.sin(this.clock * 1.3) * 0.035;   // チェアのゆれ
     (this.lift.gondola ? this.rideCabin : this.rideChair).rotation.set(sway, -h, 0, 'YXZ');
-    this.skier.rotation.set(sway, -h, 0, 'YXZ'); this.leanG.rotation.z = 0; this.st.lean = 0;
-    this.sitAmt = 1; this.sitG.rotation.x = 0.62; this.leanG.rotation.x = 0;
+    this.skier.rotation.set(sway, -h, 0, 'YXZ'); this.st.lean = 0;
+    this.sitAmt = 1; Object.assign(this.rig.pose, { sit: 1, lean: 0, flex: 0, tuck: 0, plow: 0, push: 0 }); this.rig.update(dt || 0);
     const cam = this.camera;
     if (this.lift.gondola) {   // キャビンの窓から前方を見る
       cam.position.set(P.x + dx * 0.15, P.y - 2.7, P.z + dz * 0.15);
@@ -1306,12 +1437,13 @@ class Engine {
       st.x = R.x[st.i] + Math.cos(ps) * dd + Math.sin(ps) * (st.s - st.i * 2);
       st.z = R.z[st.i] + Math.sin(ps) * dd - Math.cos(ps) * (st.s - st.i * 2);
       st.d = dd;
-      if (st.v > 3) { st.nets++; this.cb.net(); Haptics.pulse(60); }
+      if (st.v > 3) { st.nets++; this.cb.net(); Haptics.pulse(60); this.sfx.blip('thud'); }
       st.v *= 0.35; st.phi = ps - sgn * 0.35;
     }
     if (st.s >= R.len - 2) st.v = Math.min(st.v, 0.5);
-    if (e > 0.55 && st.side !== 1) { if (st.side) st.turns++; st.side = 1; }
-    if (e < -0.55 && st.side !== -1) { if (st.side) st.turns++; st.side = -1; }
+    // ターンの切り替え：新しいターンの内側のストックを突く
+    if (e > 0.55 && st.side !== 1) { if (st.side) st.turns++; st.side = 1; this.rig.plant(1); this.sfx.blip('plant'); if (v > 5) this.sfx.blip('swoosh'); }
+    if (e < -0.55 && st.side !== -1) { if (st.side) st.turns++; st.side = -1; this.rig.plant(-1); this.sfx.blip('plant'); if (v > 5) this.sfx.blip('swoosh'); }
     st.maxV = Math.max(st.maxV, st.v);
     const seg = R.seg[st.i];
     if (seg !== st.seg && !st.finished) { st.seg = seg; this.cb.segment(R.def.segs[seg]); }
@@ -1321,10 +1453,10 @@ class Engine {
       if (gt && st.s >= gt.s) {
         const ok = Math.abs(st.d - gt.d) <= 2.5 + 0.35;
         gt.state = ok ? 1 : 2; st.gi++;
-        if (ok) { st.gPass++; Haptics.pulse(12); } else { st.gMiss++; st.penalty += 2; Haptics.pulse([30, 40, 30]); }
+        if (ok) { st.gPass++; Haptics.pulse(12); this.sfx.blip('gate'); } else { st.gMiss++; st.penalty += 2; Haptics.pulse([30, 40, 30]); this.sfx.blip('miss'); }
         this.cb.gate?.(ok);
       }
-      if (st.s >= R.finishS) { st.finished = true; st.finishT = st.time; Haptics.pulse([40, 60, 40]); }
+      if (st.s >= R.finishS) { st.finished = true; st.finishT = st.time; Haptics.pulse([40, 60, 40]); this.sfx.blip('finish'); }
     } else st.finishT2 += dt;
     // エッジが立って高速で曲がっている間は細かく振動（Androidのみ）
     this.rumbleT = (this.rumbleT || 0) - dt;
@@ -1361,7 +1493,7 @@ class Engine {
         this.drawMinimap();
         this.cb.gauges(st.pL, st.pR, st.e);
       }
-      this.sfx.update(st.v, st.e, this.mode === 'run' && !this.paused);
+      this.sfx.update(st.v, st.e, st.skid || 0, Math.min(st.pL, st.pR), this.mode === 'run' && !this.paused);
     }
     this.carrierT = (this.carrierT || 0) + dt;
     if (this.carrierT > 0.05) { this.updateCarriers(this.clock); this.carrierT = 0; }
@@ -1380,9 +1512,17 @@ class Engine {
     this.skier.rotation.set(Math.atan(sl), -h, Math.atan(sr) * 0.7, 'YXZ');
     const targetLean = clamp(Math.atan(-st.omega * st.v / G), -1.05, 1.05) * (this.mode === 'run' ? 1 : 0);
     st.lean += (targetLean - st.lean) * (1 - Math.exp(-dt * 10));
-    this.leanG.rotation.z = st.lean;
-    if (this.sitAmt > 0) { if (!this.paused) this.sitAmt = Math.max(0, this.sitAmt - dt / 0.4); const k2 = this.sitAmt * this.sitAmt * (3 - 2 * this.sitAmt); this.sitG.rotation.x = 0.62 * k2; }
-    if (this.pushT !== undefined && this.pushT < 0.35) { if (!this.paused) this.pushT += dt; this.leanG.rotation.x = -0.35 * Math.sin(Math.PI * Math.min(1, this.pushT / 0.35)); } else this.leanG.rotation.x = 0;
+    // 関節の姿勢：内傾（lean）、沈み込み（ターン中）、伸び上がり（切り替え）、高速直滑降でクラウチング、ハの字、漕ぎ
+    const rp = this.rig.pose, run = this.mode === 'run' && !st.finished, k = 1 - Math.exp(-dt * 8);
+    const flexT = run ? clamp(Math.abs(st.e) * 0.95 + st.skid * 0.5, 0, 1) : (st.finished ? 0.6 : 0.15);
+    const tuckT = run && Math.abs(st.e) < 0.2 && st.v > 13 && Math.min(st.pL, st.pR) < 0.2 ? clamp((st.v - 13) / 6, 0, 1) : 0;
+    rp.lean = st.lean; rp.flex += (flexT - rp.flex) * k; rp.tuck += (tuckT - rp.tuck) * (1 - Math.exp(-dt * 3));
+    rp.plow += (Math.min(st.pL, st.pR) - rp.plow) * k;
+    if (this.sitAmt > 0 && !this.paused) this.sitAmt = Math.max(0, this.sitAmt - dt / 0.4);
+    rp.sit = (this.sitAmt || 0) * (this.sitAmt || 0) * (3 - 2 * (this.sitAmt || 0));
+    rp.push = this.pushT !== undefined && this.pushT < 0.4 ? Math.sin(Math.PI * Math.min(1, this.pushT / 0.4)) : 0;
+    if (this.pushT !== undefined && this.pushT < 0.4 && !this.paused) this.pushT += dt;
+    this.rig.update(this.paused ? 0 : dt);
     if (this.dropT !== undefined && this.dropT < 0.35) { if (!this.paused) this.dropT += dt; const k = Math.min(1, this.dropT / 0.35); this.skier.position.y += Math.max(0, this.dropH) * (1 - k) * (1 - k); }
 
     // 雪しぶき
@@ -1527,9 +1667,6 @@ class Engine {
   }
 
 }
-// スキーヤーモデルの向き補正（板を -z 方向へ）
-// 元モデルはジャンプ姿勢で板が斜めなので、板の向き（トップ側）を水平な進行方向へ回す
-const SKIER_FIX = { tip: [0.094, 0.76, -0.64], roll: 0 };
 
 /* ================= 素材の読み込み ================= */
 function loadImage(url) {
@@ -1541,7 +1678,7 @@ function b64ToBuffer(b64) {
   return u8.buffer;
 }
 async function loadAssets(progress) {
-  let done = 0; const total = 7;
+  let done = 0; const total = 6;
   const tick = (msg) => { done++; progress(done / total, msg); };
   const glb = (name, label) => fetch(ASSET + name).then(r => { if (!r.ok) throw new Error(name); return r.json(); })
     .then(j => new Promise((res, rej) => {
@@ -1550,16 +1687,15 @@ async function loadAssets(progress) {
       try { window.createImageBitmap = undefined; new THREE.GLTFLoader().parse(b64ToBuffer(j.data), '', res, e => rej(new Error(name + ': ' + (e?.message || e)))); }
       finally { window.createImageBitmap = cib; }
     })).then(v => (tick(label), v));
-  const [meta, bin, snowImg, normImg, skier, chair, pole] = await Promise.all([
+  const [meta, bin, snowImg, normImg, chair, pole] = await Promise.all([
     fetch(ASSET + 'goryu-course.json').then(r => { if (!r.ok) throw new Error('course'); return r.json(); }).then(v => (tick('コースデータ'), v)),
     fetch(ASSET + 'goryu-terrain.json').then(r => { if (!r.ok) throw new Error('terrain'); return r.json(); }).then(j => b64ToBuffer(j.data)).then(v => (tick('標高データ'), v)),
     loadImage(ASSET + 'snow-diffuse.jpg').then(v => (tick('雪テクスチャ'), v)),
     loadImage(ASSET + 'snow-normal.jpg').then(v => (tick('雪の凹凸'), v)),
-    glb('skier.json', 'スキーヤー'),
     glb('chairlift.json', 'リフト').catch(e => { console.warn(e); tick('リフト（簡易表示）'); return null; }),
     glb('liftpole.json', 'リフト支柱').catch(e => { console.warn(e); tick('支柱（簡易表示）'); return null; }),
   ]);
-  return { meta, bin, snowImg, normImg, skier, chair, pole };
+  return { meta, bin, snowImg, normImg, chair, pole };
 }
 
 /* ================= Vue UI ================= */
@@ -1579,6 +1715,8 @@ createApp({
     const toast = ref(null), result = reactive({}), best = reactive(loadBest());
     const turnHint = ref(''), pushFlash = ref(false); let pushTimer;
     const hapticsOn = ref(Haptics.on);
+    const soundOn = ref((() => { try { return localStorage.getItem('goryu-sound') !== 'off'; } catch (e) { return true; } })());
+    const toggleSound = (v) => { soundOn.value = v; try { localStorage.setItem('goryu-sound', v ? 'on' : 'off'); } catch (e) {} engine?.sfx.setMuted(!v); if (v) { engine?.sfx.init(); engine?.sfx.blip('plant'); } };
     const gatesOn = ref((() => { try { return localStorage.getItem('goryu-slalom') !== 'off'; } catch (e) { return true; } })());
     const bestKey = (id) => id + (gatesOn.value ? ':gates' : '');
     const gateFlash = ref(false); let gateTimer;
@@ -1687,11 +1825,12 @@ createApp({
       }));
       window.__engine = engine;
       engine.gatesOn = gatesOn.value;
+      engine.sfx.muted = !soundOn.value;
       engine.load(currentRun.value);
       screen.value = 'menu';
     });
 
-    return { gatesOn, toggleGates, bestKey, gateFlash, hapticsNote, testHaptics, hapticsOn, toggleHaptics, onMove, pushFlash, liftUi, reducedMotion, skipLift, screen, load, runs, runId, currentRun, hud, slopePoly, slopeColor, slopeLabel, input, toast, result, best, paused, countdown, turnHint,
+    return { soundOn, toggleSound, gatesOn, toggleGates, bestKey, gateFlash, hapticsNote, testHaptics, hapticsOn, toggleHaptics, onMove, pushFlash, liftUi, reducedMotion, skipLift, screen, load, runs, runId, currentRun, hud, slopePoly, slopeColor, slopeLabel, input, toast, result, best, paused, countdown, turnHint,
       levelBg, fmtTime, onPointer, selectRun, startRun, restart, toMenu, togglePause };
   }
 }).mount('#app');

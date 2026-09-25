@@ -60,7 +60,7 @@ manifest = {
 sw = """// 五竜ダウンヒル service worker（版: %s）
 const CACHE = 'goryu-%s';
 const CORE = ['./', 'index.html', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png',
-  'assets/goryu-course.json', 'assets/goryu-terrain.json', 'assets/skier.json', 'assets/chairlift.json',
+  'assets/goryu-course.json', 'assets/goryu-terrain.json', 'assets/chairlift.json',
   'assets/liftpole.json', 'assets/snow-diffuse.jpg', 'assets/snow-normal.jpg'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(CORE)).then(() => self.skipWaiting())); });
 self.addEventListener('activate', e => {

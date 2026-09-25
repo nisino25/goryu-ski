@@ -32,6 +32,6 @@ git add -A && git commit -m "Update" && git push
 - 標高：国土地理院（基盤地図情報 数値標高モデル）
 - コース線・リフト：© OpenStreetMap contributors（ODbL）
 - コース名・公式の距離と斜度：エイブル白馬五竜 コースガイド
-- スキーヤー「Skier」by apelab — CC-BY 3.0（Poly Pizza）
+- スキーヤー：自作の関節付きモデル（プログラムで生成）
 - リフト「Chairlift」「Ski lift pole」by Poly by Google — CC-BY 3.0（Poly Pizza）
 - 雪テクスチャ「snow_02」— Poly Haven（CC0）
