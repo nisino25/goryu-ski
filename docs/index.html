@@ -1,0 +1,1555 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#0F2536">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="五竜ダウンヒル">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="icon" href="icons/icon-192.png">
+<style>html,body{margin:0;height:100%}</style>
+</head>
+<body>
+<title>五竜ダウンヒル</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:ital,wght@0,600;0,700;1,700&family=Zen+Kaku+Gothic+New:wght@400;700;900&display=swap">
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/objects/Sky.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/vue/3.4.21/vue.global.prod.min.js"></script>
+<style>
+  :root {
+    color-scheme: dark;
+    --navy: #0F2536;
+    --snow: #F1F6FA;
+    --ice: #9FB9CE;
+    --red: #E03A3E;
+    --green: #2E9E5B;
+    --gold: #F2C230;
+  }
+  [v-cloak] { display: none; }
+  html, body { height: 100%; }
+  body {
+    background: var(--navy);
+    color: var(--snow);
+    font-family: "Zen Kaku Gothic New", "Hiragino Sans", "Noto Sans JP", system-ui, sans-serif;
+    overflow: hidden;
+    -webkit-user-select: none; user-select: none;
+    -webkit-touch-callout: none;
+    -webkit-tap-highlight-color: transparent;
+    overscroll-behavior: none;
+  }
+  #gl { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+  #fx { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+  .f-num { font-family: "Barlow Condensed", "Arial Narrow", system-ui, sans-serif; font-variant-numeric: tabular-nums; }
+  .panel { background: rgba(15, 37, 54, 0.9); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
+  .glass { background: rgba(15, 37, 54, 0.62); }
+  .safe-top { padding-top: calc(env(safe-area-inset-top, 0px) + 10px); }
+  .safe-bottom { padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 14px); }
+  .touch-layer { touch-action: none; }
+  .gauge { width: 14px; height: 120px; border-radius: 3px; background: rgba(241,246,250,0.18); position: relative; overflow: hidden; }
+  .gauge > i { position: absolute; left: 0; right: 0; bottom: 0; height: 0%; background: var(--gold); }
+  .run-card { transition: transform .15s ease, border-color .15s ease; }
+  .run-card:active { transform: scale(0.985); }
+  .run-card[aria-pressed="true"] { border-color: var(--gold); background: rgba(242,194,48,0.08); }
+  button:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+  .toast-enter-active, .toast-leave-active { transition: opacity .35s, transform .35s; }
+  .toast-enter-from, .toast-leave-to { opacity: 0; transform: translateY(-8px); }
+  .countdown { font-size: 120px; line-height: 1; text-shadow: 0 4px 30px rgba(0,0,0,.35); }
+  .scroll-y { overflow-y: auto; -webkit-overflow-scrolling: touch; }
+  .loadbar { height: 4px; background: rgba(241,246,250,.15); border-radius: 2px; overflow: hidden; }
+  .loadbar > i { display: block; height: 100%; background: var(--gold); transition: width .2s; }
+  @media (prefers-reduced-motion: reduce) { .toast-enter-active, .toast-leave-active { transition: none; } }
+</style>
+
+<canvas id="gl"></canvas>
+<canvas id="fx"></canvas>
+
+<div id="app" class="fixed inset-0 pointer-events-none" v-cloak>
+  <!-- ===== 読み込み ===== -->
+  <div v-if="screen==='loading'" class="absolute inset-0 flex flex-col items-center justify-center gap-4 px-8 bg-[color:var(--navy)] pointer-events-auto">
+    <div class="text-[11px] tracking-[0.25em] text-[color:var(--ice)]">HAKUBA GORYU</div>
+    <div class="text-[34px] font-black leading-none">五竜ダウンヒル</div>
+    <div class="w-full max-w-[260px] loadbar"><i :style="{width: (load.p*100)+'%'}"></i></div>
+    <div class="text-[12px] text-white/70">{{ load.msg }}</div>
+    <div v-if="load.err" class="text-[13px] text-[color:var(--red)] text-center">{{ load.err }}</div>
+  </div>
+
+  <!-- ===== タッチ入力レイヤー（左右半分） ===== -->
+  <div v-show="screen==='play'" class="touch-layer absolute inset-0 flex pointer-events-auto"
+       @pointerdown="onPointer($event,true)" @pointerup="onPointer($event,false)"
+       @pointercancel="onPointer($event,false)" @pointerleave="onPointer($event,false)" @pointermove="onMove"
+       @contextmenu.prevent>
+    <div class="flex-1 relative" :class="input.L ? 'bg-white/5' : ''"></div>
+    <div class="w-px bg-white/10"></div>
+    <div class="flex-1 relative" :class="input.R ? 'bg-white/5' : ''"></div>
+  </div>
+
+  <!-- ===== プレイ中HUD ===== -->
+  <template v-if="screen==='play'">
+    <!-- リフト乗車中 -->
+    <template v-if="liftUi.active && liftUi.phase !== 'off'">
+      <div class="absolute top-0 inset-x-0 px-3 safe-top flex items-start justify-between gap-3">
+        <div class="glass rounded-md px-3 py-2">
+          <div class="text-[10px] tracking-[0.15em] text-[color:var(--ice)]">{{ liftUi.gondola ? 'GONDOLA' : 'CHAIRLIFT' }}</div>
+          <div class="font-black text-[15px]">{{ liftUi.name }} 乗車中</div>
+          <div class="f-num text-[15px] text-[color:var(--ice)]">山頂駅まで {{ liftUi.remain }}m</div>
+        </div>
+        <button @click.stop="skipLift" class="glass rounded-md px-3 py-1.5 text-xs font-bold pointer-events-auto">降り場までスキップ</button>
+      </div>
+      <div v-if="liftUi.phase==='window'" class="absolute inset-x-0 top-[38%] text-center px-4">
+        <div class="inline-block rounded-xl px-6 py-4 bg-[color:var(--gold)] text-[color:var(--navy)] font-black text-2xl shadow-lg" :class="reducedMotion ? '' : 'animate-pulse'">今！タップで降りる</div>
+      </div>
+      <div class="absolute bottom-0 inset-x-0 px-4 safe-bottom text-center">
+        <div class="inline-block glass rounded-lg px-4 py-2 text-[13px] leading-relaxed">降り場で<b class="text-[color:var(--gold)]">タップ</b>→そのままスタート<br><span class="text-white/70">右ホールド＝左ターン ／ 左ホールド＝右ターン ／ ↑スワイプ＝加速</span></div>
+      </div>
+    </template>
+    <div v-show="!liftUi.active" class="absolute top-0 inset-x-0 px-3 safe-top flex items-start gap-3">
+      <div class="flex-1 min-w-0 flex flex-col gap-2">
+        <div class="glass rounded-md px-2.5 py-1.5 flex items-center gap-2 min-w-0">
+          <span class="shrink-0 w-4 h-4 rounded-sm border border-white/40" :style="{background: levelBg(hud.level)}"></span>
+          <span class="font-bold text-[13px] truncate">{{ hud.seg }}</span>
+        </div>
+        <div class="glass rounded-md px-2.5 py-2 flex flex-col gap-1.5">
+          <div class="flex items-end gap-4">
+            <div>
+              <div class="text-[10px] tracking-[0.15em] text-[color:var(--ice)]">TIME</div>
+              <div class="f-num text-[30px] leading-none font-bold">{{ fmtTime(hud.t) }}</div>
+            </div>
+            <div>
+              <div class="text-[10px] tracking-[0.15em] text-[color:var(--ice)]">SPEED</div>
+              <div class="f-num leading-none font-bold"><span class="text-[44px]">{{ hud.kmh }}</span><span class="text-sm ml-0.5">km/h</span></div>
+            </div>
+          </div>
+          <div class="flex items-center gap-2.5">
+            <svg width="58" height="42" viewBox="0 0 58 42" aria-hidden="true" class="shrink-0">
+              <polygon :points="slopePoly" :fill="slopeColor" fill-opacity="0.85" stroke="#F1F6FA" stroke-width="1.2" stroke-linejoin="round"/>
+              <line x1="2" y1="40" x2="56" y2="40" stroke="#9FB9CE" stroke-width="1" stroke-dasharray="2 2"/>
+            </svg>
+            <div class="leading-none">
+              <div class="text-[10px] tracking-[0.15em] text-[color:var(--ice)]">SLOPE</div>
+              <div class="f-num font-bold"><span class="text-[30px]">{{ hud.slope }}</span><span class="text-sm">°</span>
+                <span class="ml-1 text-[12px] font-bold px-1.5 py-0.5 rounded-sm align-middle" :style="{background: slopeColor}">{{ slopeLabel }}</span></div>
+            </div>
+          </div>
+          <div class="f-num text-[14px] text-[color:var(--ice)] leading-tight">標高 {{ hud.alt }}m · ゴールまで {{ hud.remain }}m</div>
+        </div>
+      </div>
+      <div class="flex flex-col items-end gap-2 pointer-events-auto">
+        <canvas id="minimap" width="96" height="150" class="rounded-md" style="width:96px;height:150px"></canvas>
+        <button @click="togglePause" class="glass rounded-md px-3 py-1.5 text-xs font-bold">{{ paused ? '再開' : '一時停止' }}</button>
+      </div>
+    </div>
+
+    <!-- 進行バー -->
+    <div v-show="!liftUi.active" class="absolute inset-x-3" style="top: calc(env(safe-area-inset-top,0px) + 252px)">
+      <div class="relative h-1.5 rounded-full overflow-hidden flex bg-white/10">
+        <div v-for="s in currentRun.segs" :key="s.name" :style="{flex: s.span, background: levelBg(s.level)}" class="opacity-70 border-r border-[color:var(--navy)]"></div>
+      </div>
+      <div class="absolute -top-1 w-1 h-3.5 bg-[color:var(--gold)] rounded-sm" :style="{left: (hud.prog*100)+'%'}"></div>
+    </div>
+
+    <transition name="toast">
+      <div v-if="toast" class="absolute inset-x-6 top-[42%] -translate-y-1/2 text-center">
+        <div class="inline-block panel rounded-lg px-4 py-3 border border-white/15">
+          <div class="flex items-center justify-center gap-2">
+            <span class="w-3.5 h-3.5 rounded-sm border border-white/40" :style="{background: levelBg(toast.level)}"></span>
+            <span class="text-xs text-[color:var(--ice)]">{{ toast.level }}</span>
+          </div>
+          <div class="text-lg font-black mt-0.5" style="text-wrap:balance">{{ toast.name }}</div>
+          <div v-if="toast.len" class="f-num text-[15px] text-[color:var(--ice)]">公式 {{ toast.len }}m · 平均{{ toast.avg }}° · 最大{{ toast.max }}°</div>
+        </div>
+      </div>
+    </transition>
+
+    <div v-if="countdown>0" class="absolute inset-0 flex flex-col items-center justify-center gap-6">
+      <div class="countdown f-num font-bold">{{ countdown }}</div>
+      <div class="flex w-full px-4 gap-3 text-center text-[13px]">
+        <div class="flex-1 glass rounded-lg py-3 px-2"><b class="text-[color:var(--gold)]">左をホールド</b><br>左足に荷重<br>→ 右へターン</div>
+        <div class="flex-1 glass rounded-lg py-3 px-2"><b class="text-[color:var(--gold)]">右をホールド</b><br>右足に荷重<br>→ 左へターン</div>
+      </div>
+      <div class="glass rounded-md px-3 py-1.5 text-xs text-center">両方ホールド = ハの字でブレーキ<br>上にスワイプ = ストックで漕いで加速</div>
+    </div>
+
+    <div v-if="paused" class="absolute inset-0 flex items-center justify-center pointer-events-auto bg-black/40">
+      <div class="panel rounded-xl p-5 w-[min(320px,calc(100%-32px))] flex flex-col gap-3 text-center">
+        <div class="text-xl font-black">一時停止中</div>
+        <button @click="togglePause" class="rounded-lg py-3 font-bold bg-[color:var(--red)]">滑走を再開</button>
+        <button @click="restart" class="rounded-lg py-3 font-bold bg-white/10">最初からやり直す</button>
+        <button @click="toMenu" class="rounded-lg py-3 font-bold bg-white/10">コース選択へ</button>
+      </div>
+    </div>
+
+    <div v-show="!liftUi.active" class="absolute bottom-0 inset-x-0 px-4 safe-bottom flex items-end justify-between">
+      <div class="flex items-end gap-2">
+        <div class="gauge"><i id="gaugeL"></i></div>
+        <div class="text-[11px] leading-tight text-white/80 pb-1">左足<br><span class="text-white/55">→右ターン</span></div>
+      </div>
+      <div class="flex flex-col items-center pb-1 min-w-[110px]">
+        <div class="f-num text-2xl font-bold text-center" :class="pushFlash || turnHint ? 'text-[color:var(--gold)]' : 'text-white/40'">{{ pushFlash ? '漕ぐ！' : (turnHint || 'まっすぐ') }}</div>
+        <div class="text-[11px] text-white/60">↑スワイプで加速</div>
+      </div>
+      <div class="flex items-end gap-2">
+        <div class="text-[11px] leading-tight text-white/80 pb-1 text-right">右足<br><span class="text-white/55">左ターン←</span></div>
+        <div class="gauge"><i id="gaugeR"></i></div>
+      </div>
+    </div>
+  </template>
+
+  <!-- ===== メニュー ===== -->
+  <div v-if="screen==='menu'" class="absolute inset-0 pointer-events-auto flex flex-col justify-end">
+    <div class="px-4 safe-top absolute top-0 inset-x-0">
+      <div class="inline-block glass rounded-lg px-3 py-2">
+        <div class="text-[11px] tracking-[0.25em] text-[color:var(--ice)] font-bold">HAKUBA GORYU · 長野県白馬村</div>
+        <h1 class="text-[34px] leading-[1.05] font-black" style="text-wrap:balance">五竜ダウンヒル</h1>
+      </div>
+    </div>
+    <div class="panel rounded-t-2xl max-h-[64%] scroll-y px-4 pt-4 safe-bottom flex flex-col gap-4">
+      <p class="text-[13px] leading-relaxed text-white/80">
+        左に曲がりたいときは<b class="text-white">右足（外足）</b>に荷重。画面の<b class="text-[color:var(--gold)]">右側をホールド</b>すると、じわっとエッジが立って左へカーブします。地形は国土地理院の標高データから作った実際の五竜です。
+      </p>
+      <div class="flex flex-col gap-2">
+        <div class="text-[11px] tracking-[0.2em] text-[color:var(--ice)]">コースを選ぶ</div>
+        <button v-for="r in runs" :key="r.id" @click="selectRun(r)" :aria-pressed="r.id===runId"
+                class="run-card text-left rounded-xl border border-white/15 px-3 py-3 flex flex-col gap-1.5">
+          <div class="flex items-center gap-2">
+            <span class="w-4 h-4 rounded-sm border border-white/40 shrink-0" :style="{background: levelBg(r.level)}"></span>
+            <span class="font-black text-[16px]">{{ r.name }}</span>
+            <span class="ml-auto text-[11px] text-white/60">{{ r.level }}</span>
+          </div>
+          <div class="text-[12px] text-white/75">{{ r.frm }} {{ r.topAlt }}m → {{ r.to }} {{ r.botAlt }}m</div>
+          <div class="flex flex-wrap gap-x-1 gap-y-0.5 text-[11px] text-[color:var(--ice)]">
+            <template v-for="(s,i) in r.segs" :key="s.name"><span v-if="i">›</span><span>{{ s.name.replace('コース','') }}</span></template>
+          </div>
+          <div class="flex gap-4 f-num text-[15px]">
+            <span>{{ r.length.toLocaleString() }}m</span>
+            <span>標高差 {{ r.topAlt - r.botAlt }}m</span>
+            <span>最大 {{ r.maxSlope }}°</span>
+            <span class="ml-auto text-[color:var(--gold)]">BEST {{ best[r.id] ? fmtTime(best[r.id]) : '--:--.-' }}</span>
+          </div>
+        </button>
+      </div>
+      <button @click="startRun" class="rounded-xl py-4 text-lg font-black bg-[color:var(--red)] shadow-lg">滑走開始</button>
+      <label for="haptics" class="flex items-center justify-between rounded-lg border border-white/15 px-3 py-2.5 text-[13px]">
+        <span>振動（ターン・漕ぐ・ネット）<span class="block text-[11px] text-white/50">Androidは常時。iPhoneは iOS 18以降・タップ時のみ</span></span>
+        <input id="haptics" type="checkbox" class="w-5 h-5 accent-[color:var(--gold)]" :checked="hapticsOn" @change="toggleHaptics($event.target.checked)">
+      </label>
+      <div class="text-[11px] leading-relaxed text-white/50 flex flex-col gap-1">
+        <p>距離・標高差・最大斜度は実地形での実測値。看板の「公式」値はエイブル白馬五竜のコースガイドより。コース線はOpenStreetMapのデータをつないだもので、区間の境目はおおよそです。PCは ← / → キー（左足 / 右足）、↓ でブレーキ、↑ で漕いで加速。</p>
+        <p>出典：標高 国土地理院（数値標高モデル）／ コース・リフト © OpenStreetMap contributors (ODbL)／ スキーヤー「Skier」by apelab・リフト「Chairlift」「Ski lift pole」by Poly by Google, CC-BY 3.0 (Poly Pizza)／ 雪テクスチャ Poly Haven (CC0)</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== リザルト ===== -->
+  <div v-if="screen==='result'" class="absolute inset-0 pointer-events-auto flex items-center justify-center px-4 bg-black/30">
+    <div class="panel rounded-2xl p-5 w-full max-w-[380px] flex flex-col gap-4">
+      <div>
+        <div class="text-[11px] tracking-[0.2em] text-[color:var(--ice)]">FINISH · {{ currentRun.to }}</div>
+        <div class="text-xl font-black">{{ currentRun.name }}</div>
+      </div>
+      <div class="f-num text-[64px] leading-none font-bold">{{ fmtTime(result.time) }}</div>
+      <div v-if="result.isBest" class="-mt-2 text-[color:var(--gold)] font-bold text-sm">自己ベスト更新</div>
+      <div class="grid grid-cols-2 gap-x-4 gap-y-3">
+        <div><div class="text-[11px] text-[color:var(--ice)]">最高速度</div><div class="f-num text-2xl font-bold">{{ result.maxKmh }} km/h</div></div>
+        <div><div class="text-[11px] text-[color:var(--ice)]">平均速度</div><div class="f-num text-2xl font-bold">{{ result.avgKmh }} km/h</div></div>
+        <div><div class="text-[11px] text-[color:var(--ice)]">ターン数</div><div class="f-num text-2xl font-bold">{{ result.turns }}</div></div>
+        <div><div class="text-[11px] text-[color:var(--ice)]">ネット接触</div><div class="f-num text-2xl font-bold">{{ result.nets }}</div></div>
+      </div>
+      <p class="text-[13px] text-white/75 leading-relaxed">{{ result.comment }}</p>
+      <div class="flex gap-2">
+        <button @click="restart" class="flex-1 rounded-xl py-3 font-black bg-[color:var(--red)]">もう一本</button>
+        <button @click="toMenu" class="flex-1 rounded-xl py-3 font-bold bg-white/10">コース選択</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const ASSET = 'assets/';
+const DEG = Math.PI / 180, G = 9.81;
+const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const LOW_END = (navigator.hardwareConcurrency || 4) <= 4;
+const LEVEL_COL = { '初': '#2E9E5B', '中': '#E03A3E', '上': '#15171A' };
+function levelBg(l) {
+  const cs = [...(l || '').replace(/級/g, '')].map(c => LEVEL_COL[c]).filter(Boolean);
+  if (cs.length < 2) return cs[0] || '#888';
+  return `linear-gradient(135deg, ${cs[0]} 50%, ${cs[1]} 50%)`;
+}
+const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
+const wrapA = (a) => { while (a > Math.PI) a -= 2 * Math.PI; while (a < -Math.PI) a += 2 * Math.PI; return a; };
+const lerpAngle = (a, b, t) => a + wrapA(b - a) * t;
+// 向きの約束：yaw φ の進行方向 = (sinφ, 0, -cosφ)、右手方向 = (cosφ, 0, sinφ)。x=東, z=南
+
+/* ================= 地形（国土地理院DEM） ================= */
+class Terrain {
+  constructor(meta, buf) {
+    this.n = meta.near; this.f = meta.far;
+    this.nh = new Int16Array(buf, 0, this.n.nx * this.n.nz);
+    this.fh = new Int16Array(buf, this.n.nx * this.n.nz * 2, this.f.nx * this.f.nz);
+  }
+  static bil(arr, g, x, z) {
+    const fx = (x - g.x0) / g.step, fz = (z - g.z0) / g.step;
+    const i = Math.floor(fx), j = Math.floor(fz);
+    if (i < 0 || j < 0 || i >= g.nx - 1 || j >= g.nz - 1) return null;
+    const tx = fx - i, tz = fz - j, k = j * g.nx + i;
+    return ((arr[k] * (1 - tx) + arr[k + 1] * tx) * (1 - tz) + (arr[k + g.nx] * (1 - tx) + arr[k + g.nx + 1] * tx) * tz) * 0.1;
+  }
+  h(x, z) {
+    const v = Terrain.bil(this.nh, this.n, x, z);
+    if (v !== null) return v;
+    const w = Terrain.bil(this.fh, this.f, x, z);
+    return w === null ? 700 : w;
+  }
+  grad(x, z, out) {
+    const e = 2.5;
+    out[0] = (this.h(x + e, z) - this.h(x - e, z)) / (2 * e);
+    out[1] = (this.h(x, z + e) - this.h(x, z - e)) / (2 * e);
+    return out;
+  }
+}
+
+/* ================= コース（OSMの線を実地形に載せたもの） ================= */
+class Route {
+  constructor(def, T) {
+    this.def = def;
+    const N = this.N = def.x.length;
+    this.x = Float32Array.from(def.x); this.z = Float32Array.from(def.z);
+    this.y = new Float32Array(N); this.psi = new Float32Array(N); this.seg = new Uint8Array(N);
+    this.hwL = new Float32Array(N); this.hwR = new Float32Array(N); this.exL = new Float32Array(N); this.exR = new Float32Array(N);
+    for (let i = 0; i < N; i++) {
+      this.y[i] = T.h(this.x[i], this.z[i]);
+      const a = Math.max(0, i - 2), b = Math.min(N - 1, i + 2);
+      this.psi[i] = Math.atan2(this.x[b] - this.x[a], -(this.z[b] - this.z[a]));
+      let s = 0; for (let k = 0; k < def.segStart.length; k++) if (def.segStart[k] <= i) s = k;
+      this.seg[i] = s;
+    }
+    // 幅をなめらかに、カーブ内側は曲率半径で制限（メッシュの折れ返り防止）
+    const wRaw = Float32Array.from({ length: N }, (_, i) => def.segs[this.seg[i]].width);
+    const w = new Float32Array(N);
+    for (let i = 0; i < N; i++) { let s = 0, n = 0; for (let k = -15; k <= 15; k++) { const j = i + k; if (j >= 0 && j < N) { s += wRaw[j]; n++; } } w[i] = s / n; }
+    const curv = new Float32Array(N);
+    for (let i = 0; i < N; i++) { const a = Math.max(0, i - 4), b = Math.min(N - 1, i + 4); curv[i] = wrapA(this.psi[b] - this.psi[a]) / Math.max(2, (b - a) * 2); }
+    for (let i = 0; i < N; i++) {
+      let k = 0; for (let d = -6; d <= 6; d++) { const j = clamp(i + d, 0, N - 1); if (Math.abs(curv[j]) > Math.abs(k)) k = curv[j]; }
+      const R = Math.abs(k) > 1e-5 ? 1 / Math.abs(k) : 1e5;
+      const inner = Math.max(8, 0.85 * R - 3);
+      const hw = w[i] / 2;
+      // k>0 = 右カーブ → 曲率中心は右側
+      this.hwR[i] = k > 0 ? Math.min(hw, inner) : hw;
+      this.hwL[i] = k < 0 ? Math.min(hw, inner) : hw;
+      this.exR[i] = k > 0 ? Math.max(this.hwR[i] + 4, Math.min(this.hwR[i] + 18, 0.9 * R)) : this.hwR[i] + 18;
+      this.exL[i] = k < 0 ? Math.max(this.hwL[i] + 4, Math.min(this.hwL[i] + 18, 0.9 * R)) : this.hwL[i] + 18;
+    }
+    this.len = (N - 1) * 2;
+    this.finishS = this.len - 40;
+    this._p = {};
+  }
+  project(x, z, guess) {
+    let best = clamp(guess | 0, 0, this.N - 1), bd = Infinity;
+    for (let pass = 0; pass < 4; pass++) {
+      const a = Math.max(0, best - 30), b = Math.min(this.N - 1, best + 30);
+      let moved = false;
+      for (let i = a; i <= b; i++) {
+        const dx = x - this.x[i], dz = z - this.z[i], d = dx * dx + dz * dz;
+        if (d < bd) { bd = d; if (i !== best) moved = true; best = i; }
+      }
+      if (!moved || (best !== a && best !== b)) break;
+    }
+    const i = best, ps = this.psi[i];
+    const dx = x - this.x[i], dz = z - this.z[i];
+    const p = this._p;
+    p.i = i; p.s = i * 2 + dx * Math.sin(ps) - dz * Math.cos(ps);
+    p.d = dx * Math.cos(ps) + dz * Math.sin(ps);
+    return p;
+  }
+  point(i, d, T, out) {
+    i = clamp(i, 0, this.N - 1);
+    const ps = this.psi[i];
+    out.x = this.x[i] + Math.cos(ps) * d; out.z = this.z[i] + Math.sin(ps) * d;
+    out.y = T.h(out.x, out.z);
+    return out;
+  }
+}
+
+/* ================= サウンド ================= */
+class Sfx {
+  init() {
+    if (this.ctx) { this.ctx.resume?.(); return; }
+    try {
+      const ctx = this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const buf = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate);
+      const d = buf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+      const mk = (type, freq, q) => {
+        const src = ctx.createBufferSource(); src.buffer = buf; src.loop = true;
+        const f = ctx.createBiquadFilter(); f.type = type; f.frequency.value = freq; f.Q.value = q;
+        const g = ctx.createGain(); g.gain.value = 0;
+        src.connect(f); f.connect(g); g.connect(ctx.destination); src.start();
+        return { f, g };
+      };
+      this.wind = mk('lowpass', 400, 0.7);
+      this.carve = mk('bandpass', 2200, 1.2);
+    } catch (e) { this.ctx = null; }
+  }
+  update(v, edge, active) {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime, vv = active ? v : 0;
+    this.wind.g.gain.setTargetAtTime(Math.min(0.42, Math.pow(vv / 30, 1.5) * 0.36), t, 0.1);
+    this.wind.f.frequency.setTargetAtTime(250 + vv * 45, t, 0.1);
+    this.carve.g.gain.setTargetAtTime(active ? Math.min(0.2, Math.abs(edge) * vv / 25 * 0.2) : 0, t, 0.06);
+    this.carve.f.frequency.setTargetAtTime(1500 + vv * 60, t, 0.1);
+  }
+}
+
+/* ================= 触覚フィードバック ================= */
+// Android: Vibration API。iPhone(iOS 18+): <input switch> を押すとシステムの軽い触覚が鳴る仕組みを利用（タッチ操作の直後のみ有効）
+const Haptics = {
+  on: (() => { try { return localStorage.getItem('goryu-haptics') !== 'off'; } catch (e) { return true; } })(),
+  el: null,
+  set(v) { this.on = v; try { localStorage.setItem('goryu-haptics', v ? 'on' : 'off'); } catch (e) {} },
+  ios() {
+    if (this.el) return this.el;
+    try {
+      const lab = document.createElement('label'), inp = document.createElement('input');
+      inp.type = 'checkbox'; inp.setAttribute('switch', ''); lab.appendChild(inp);
+      lab.style.cssText = 'position:fixed;left:-200px;top:0;opacity:0;pointer-events:none';
+      document.body.appendChild(lab); this.el = lab;
+    } catch (e) {}
+    return this.el;
+  },
+  pulse(ms = 10, gesture = false) {
+    if (!this.on) return;
+    try { if (navigator.vibrate && navigator.vibrate(ms)) return; } catch (e) {}
+    if (gesture) try { this.ios()?.click(); } catch (e) {}
+  },
+};
+
+/* ================= 素材 ================= */
+function makeGroomTexture(img) {
+  const c = document.createElement('canvas'); c.width = c.height = 512;
+  const g = c.getContext('2d');
+  g.drawImage(img, 0, 0, 512, 512);
+  g.fillStyle = 'rgba(255,255,255,0.35)'; g.fillRect(0, 0, 512, 512);
+  for (let x = 0; x < 512; x += 12) { g.fillStyle = 'rgba(120,150,180,0.13)'; g.fillRect(x, 0, 4, 512); g.fillStyle = 'rgba(255,255,255,0.25)'; g.fillRect(x + 5, 0, 2, 512); }
+  return c;
+}
+// ゴンドラのキャビン（テレキャビン風）：赤い車体・窓帯・白い柱・屋根・吊り手。原点＝ケーブル位置
+function makeGondolaGeometry(withGlass) {
+  const pos = [], nor = [], col = [];
+  const add = (geo, color) => {
+    geo = geo.toNonIndexed(); const p = geo.attributes.position, n = geo.attributes.normal, c = new THREE.Color(color).convertSRGBToLinear();
+    for (let i = 0; i < p.count; i++) { pos.push(p.getX(i), p.getY(i), p.getZ(i)); nor.push(n.getX(i), n.getY(i), n.getZ(i)); col.push(c.r, c.g, c.b); }
+  };
+  const box = (w, h, d, x, y, z, color) => { const g = new THREE.BoxGeometry(w, h, d); g.translate(x, y, z); add(g, color); };
+  const W = 1.9, D = 1.7, red = '#c8262b', white = '#eef1f4', steel = '#5b636d', glass = '#24323f';
+  box(W, 0.95, D, 0, -3.55, 0, red);                              // 下部車体
+  box(W - 0.1, 0.08, D - 0.1, 0, -4.05, 0, steel);                // 床下
+  if (withGlass) box(W - 0.04, 0.8, D - 0.04, 0, -2.68, 0, glass); // 窓ガラス帯
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) box(0.09, 0.8, 0.09, sx * (W / 2 - 0.05), -2.68, sz * (D / 2 - 0.05), white);   // 窓柱
+  box(W, 0.22, D, 0, -2.17, 0, white);                            // 屋根の縁
+  box(W - 0.35, 0.16, D - 0.35, 0, -1.98, 0, red);                // 屋根
+  box(0.1, 1.75, 0.1, 0, -0.95, 0, steel);                        // 吊り手
+  box(0.45, 0.3, 0.7, 0, -0.1, 0, steel);                         // 握索機
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+  geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  return geo;
+}
+function makePineGeometry() {
+  const pos = [], nor = [], col = [];
+  const green = new THREE.Color('#1c3527'), green2 = new THREE.Color('#284834'), snow = new THREE.Color('#e9f0f6'), trunk = new THREE.Color('#45372c');
+  const add = (geo, fn) => {
+    geo = geo.toNonIndexed();
+    const p = geo.attributes.position, n = geo.attributes.normal;
+    for (let i = 0; i < p.count; i++) {
+      pos.push(p.getX(i), p.getY(i), p.getZ(i)); nor.push(n.getX(i), n.getY(i), n.getZ(i));
+      const c = fn(p.getY(i), n.getY(i)); col.push(c.r, c.g, c.b);
+    }
+  };
+  const tr = new THREE.CylinderGeometry(0.14, 0.2, 1.8, 4, 1, true); tr.translate(0, 0.9, 0); add(tr, () => trunk);
+  const tiers = [[1.1, 2.3, 3.0], [2.6, 1.85, 2.8], [4.0, 1.4, 2.5], [5.2, 0.95, 2.2], [6.3, 0.5, 1.7]];
+  const c = new THREE.Color();
+  for (const [y, r, h] of tiers) {
+    const g = new THREE.ConeGeometry(r, h, 6, 1, true); g.translate(0, y + h / 2, 0);
+    add(g, (py, ny) => ny < -0.5 ? green : c.copy(green2).lerp(snow, clamp((py - y) / h * 1.2 - 0.15, 0, 0.92)));
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+  geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  return geo;
+}
+
+/* ================= ゲームエンジン ================= */
+class Engine {
+  constructor(canvas, assets, cb) {
+    this.cb = cb; this.meta = assets.meta; this.assets = assets;
+    this.T = new Terrain(assets.meta, assets.bin);
+    this.input = { L: false, R: false, forcePlow: false };
+    this.sfx = new Sfx();
+    const r = this.renderer = new THREE.WebGLRenderer({ canvas, antialias: !LOW_END, powerPreference: 'high-performance' });
+    r.setPixelRatio(Math.min(window.devicePixelRatio || 1, LOW_END ? 1.5 : 2));
+    r.outputEncoding = THREE.sRGBEncoding;
+    r.toneMapping = THREE.ACESFilmicToneMapping; r.toneMappingExposure = 0.9;
+    r.shadowMap.enabled = true; r.shadowMap.type = THREE.PCFSoftShadowMap;
+    const scene = this.scene = new THREE.Scene();
+    this.camera = new THREE.PerspectiveCamera(62, 1, 0.1, 30000);
+    scene.fog = new THREE.FogExp2(0xc4d6e8, 0.00011);
+
+    // 空と太陽（朝、南東からの光）
+    this.sunDir = new THREE.Vector3(0.3, 0.85, 0.42).normalize();   // 高めの太陽：影が足元にまとまる
+    const sky = this.sky = new THREE.Sky(); sky.scale.setScalar(25000);
+    const u = sky.material.uniforms;
+    u.turbidity.value = 3.5; u.rayleigh.value = 1.1; u.mieCoefficient.value = 0.004; u.mieDirectionalG.value = 0.8;
+    u.sunPosition.value.copy(this.sunDir);
+    scene.add(sky);
+    scene.add(new THREE.HemisphereLight(0xcfe2ff, 0x8792a0, 0.75));
+    const sun = this.sun = new THREE.DirectionalLight(0xfff0dc, 2.3);
+    sun.castShadow = true;
+    sun.shadow.mapSize.set(LOW_END ? 1024 : 2048, LOW_END ? 1024 : 2048);
+    const sc = sun.shadow.camera; sc.left = -28; sc.right = 28; sc.top = 28; sc.bottom = -28; sc.near = 60; sc.far = 190;
+    sun.shadow.bias = -0.00015; sun.shadow.normalBias = 0.004;
+    scene.add(sun); scene.add(sun.target);
+
+    // 雪テクスチャ（Poly Haven）
+    const aniso = r.capabilities.getMaxAnisotropy();
+    const snowMap = new THREE.Texture(assets.snowImg); snowMap.encoding = THREE.sRGBEncoding;
+    const nrm = new THREE.Texture(assets.normImg);
+    const groom = new THREE.CanvasTexture(makeGroomTexture(assets.snowImg)); groom.encoding = THREE.sRGBEncoding;
+    for (const t of [snowMap, nrm, groom]) { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = aniso; t.needsUpdate = true; }
+    this.mat = {
+      near: new THREE.MeshStandardMaterial({ map: snowMap, normalMap: nrm, normalScale: new THREE.Vector2(0.4, 0.4), roughness: 0.92, vertexColors: true }),
+      piste: new THREE.MeshStandardMaterial({ map: groom, normalMap: nrm, normalScale: new THREE.Vector2(0.35, 0.35), roughness: 0.78, vertexColors: true }),
+      far: new THREE.MeshLambertMaterial({ vertexColors: true }),
+      tree: new THREE.MeshLambertMaterial({ vertexColors: true }),
+    };
+
+    this.buildFar(); this.buildNear(); this.buildTrees(); this.buildLifts();
+    this.makeSkier(assets.skier); this.makeParticles(); this.makeFlakes();
+    this.fx = document.getElementById('fx'); this.fxg = this.fx.getContext('2d');
+    this.lines = Array.from({ length: 36 }, () => this.newLine(true));
+    this.routeGroup = new THREE.Group(); scene.add(this.routeGroup);
+    this.g2 = [0, 0]; this.tmp = {}; this.tmp2 = {};
+    this.mode = 'idle'; this.clock = 0;
+    this.resize(); addEventListener('resize', () => this.resize());
+    this.last = performance.now();
+    requestAnimationFrame(t => this.frame(t));
+  }
+  resize() {
+    const w = innerWidth, h = innerHeight;
+    this.renderer.setSize(w, h, false);
+    this.camera.aspect = w / h; this.camera.updateProjectionMatrix();
+    const pr = Math.min(window.devicePixelRatio || 1, 2);
+    this.fx.width = w * pr; this.fx.height = h * pr; this.fxg.setTransform(pr, 0, 0, pr, 0, 0);
+  }
+
+  /* ---------- 遠景：北アルプスまで含む広域地形 ---------- */
+  buildFar() {
+    const T = this.T, f = T.f, n = T.n;
+    const nx = f.nx, nz = f.nz, pos = new Float32Array(nx * nz * 3), col = new Float32Array(nx * nz * 3);
+    let seed = 3; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+    const cSnow = new THREE.Color('#f4f7fb'), cForest = new THREE.Color('#5b6f68'), cRock = new THREE.Color('#7d8794'), c = new THREE.Color();
+    for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) {
+      const k = j * nx + i, x = f.x0 + i * f.step, z = f.z0 + j * f.step, y = T.fh[k] * 0.1;
+      pos.set([x, y - 4, z], k * 3);
+      const gx = (T.fh[j * nx + Math.min(nx - 1, i + 1)] - T.fh[j * nx + Math.max(0, i - 1)]) * 0.1 / (2 * f.step);
+      const gz = (T.fh[Math.min(nz - 1, j + 1) * nx + i] - T.fh[Math.max(0, j - 1) * nx + i]) * 0.1 / (2 * f.step);
+      const slope = Math.atan(Math.hypot(gx, gz)) / DEG;
+      const forest = y < 1950 ? clamp((1950 - y) / 400, 0, 1) * clamp((slope - 6) / 10, 0, 1) * (0.55 + rnd() * 0.45) : 0;
+      c.copy(cSnow).lerp(cForest, forest * 0.75);
+      if (slope > 36) c.lerp(cRock, clamp((slope - 36) / 14, 0, 0.8));
+      col.set([c.r, c.g, c.b], k * 3);
+    }
+    const idx = [];
+    const inNear = (x, z) => x > n.x0 + 12 && x < n.x0 + (n.nx - 1) * n.step - 12 && z > n.z0 + 12 && z < n.z0 + (n.nz - 1) * n.step - 12;
+    for (let j = 0; j < nz - 1; j++) for (let i = 0; i < nx - 1; i++) {
+      const cx = f.x0 + (i + 0.5) * f.step, cz = f.z0 + (j + 0.5) * f.step;
+      if (inNear(cx, cz)) continue;
+      const a = j * nx + i, b = a + nx, c2 = a + 1, d = b + 1;
+      idx.push(a, b, c2, c2, b, d);   // 上向き法線（x東・z南のグリッド）
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    geo.setIndex(idx); geo.computeVertexNormals();
+    this.scene.add(new THREE.Mesh(geo, this.mat.far));
+  }
+  /* ---------- 近景：5mメッシュ由来の地形 ---------- */
+  buildNear() {
+    const T = this.T, n = T.n, S = 2;                      // 8m間隔で描画
+    const nx = Math.floor((n.nx - 1) / S) + 1, nz = Math.floor((n.nz - 1) / S) + 1;
+    this.nearDims = { nx, nz, S };
+    const pos = new Float32Array(nx * nz * 3), uv = new Float32Array(nx * nz * 2), col = new Float32Array(nx * nz * 3);
+    for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) {
+      const k = j * nx + i, gi = i * S, gj = j * S;
+      const x = n.x0 + gi * n.step, z = n.z0 + gj * n.step;
+      pos.set([x, T.nh[gj * n.nx + gi] * 0.1, z], k * 3);
+      uv.set([x / 9, z / 9], k * 2);
+    }
+    const geo = this.nearGeo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+    geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    const idx = new Uint32Array((nx - 1) * (nz - 1) * 6); let q = 0;
+    for (let j = 0; j < nz - 1; j++) for (let i = 0; i < nx - 1; i++) {
+      const a = j * nx + i, b = a + nx, c = a + 1, d = b + 1;
+      idx[q++] = a; idx[q++] = b; idx[q++] = c; idx[q++] = c; idx[q++] = b; idx[q++] = d;   // 上向き法線
+    }
+    geo.setIndex(new THREE.BufferAttribute(idx, 1));
+    this.nearBaseY = Float32Array.from({ length: nx * nz }, (_, k) => pos[k * 3 + 1]);
+    geo.computeVertexNormals();
+    const nrm = geo.attributes.normal;
+    for (let k = 0; k < nx * nz; k++) {
+      const slope = Math.acos(clamp(nrm.getY(k), -1, 1)) / DEG;
+      const rock = clamp((slope - 42) / 14, 0, 0.5);
+      col.set([1 - rock * 0.3, 1 - rock * 0.26, 1 - rock * 0.18], k * 3);
+    }
+    const m = this.nearMesh = new THREE.Mesh(geo, this.mat.near);
+    m.receiveShadow = true;
+    this.scene.add(m);
+  }
+  // 選択コースの下の地面を少し沈めてゲレンデ面（リボン）と重ならないようにする
+  sinkNearUnder(route) {
+    const T = this.T, n = T.n, { nx, nz, S } = this.nearDims, step = n.step * S;
+    const clr = new Float32Array(nx * nz).fill(1e9);
+    for (let i = 0; i < route.N; i += 2) {
+      const hw = Math.max(route.hwL[i], route.hwR[i]), R = hw + 16;
+      const ci = (route.x[i] - n.x0) / step, cj = (route.z[i] - n.z0) / step, rr = Math.ceil(R / step);
+      for (let j = Math.max(0, Math.floor(cj) - rr); j <= Math.min(nz - 1, Math.ceil(cj) + rr); j++)
+        for (let k = Math.max(0, Math.floor(ci) - rr); k <= Math.min(nx - 1, Math.ceil(ci) + rr); k++) {
+          const dx = n.x0 + k * step - route.x[i], dz = n.z0 + j * step - route.z[i];
+          const c = Math.sqrt(dx * dx + dz * dz) - hw;
+          if (c < clr[j * nx + k]) clr[j * nx + k] = c;
+        }
+    }
+    const pos = this.nearGeo.attributes.position;
+    for (let k = 0; k < nx * nz; k++) {
+      const c = clr[k], sink = c < 6 ? 1.6 : c < 16 ? 1.6 * (16 - c) / 10 : 0;
+      pos.setY(k, this.nearBaseY[k] - sink);
+    }
+    pos.needsUpdate = true;
+    this.nearGeo.computeBoundingSphere();
+  }
+  /* ---------- 木：雪をかぶった針葉樹（空間分割してカリング） ---------- */
+  buildTrees() {
+    const t = this.meta.trees, base = makePineGeometry(), CH = 260;
+    const chunks = new Map();
+    const count = t.length / 4, keep = LOW_END ? 0.6 : 1;
+    let seed = 9; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+    for (let i = 0; i < count; i++) {
+      if (rnd() > keep) continue;
+      const x = t[i * 4], z = t[i * 4 + 1];
+      const key = Math.floor(x / CH) + ',' + Math.floor(z / CH);
+      if (!chunks.has(key)) chunks.set(key, []);
+      chunks.get(key).push(i);
+    }
+    const m = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3(), v = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0);
+    for (const list of chunks.values()) {
+      let cx = 0, cy = 0, cz = 0;
+      for (const i of list) { cx += t[i * 4]; cy += t[i * 4 + 2]; cz += t[i * 4 + 1]; }
+      cx /= list.length; cy /= list.length; cz /= list.length;
+      const geo = base.clone();
+      geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 10, 0), CH * 0.75 + 60);
+      const mesh = new THREE.InstancedMesh(geo, this.mat.tree, list.length);
+      mesh.position.set(cx, cy, cz);
+      list.forEach((i, k) => {
+        const sc = t[i * 4 + 3] * 1.45;
+        q.setFromAxisAngle(up, rnd() * 6.28);
+        v.set(t[i * 4] - cx, t[i * 4 + 2] - cy, t[i * 4 + 1] - cz); s.set(sc, sc * (0.9 + rnd() * 0.3), sc);
+        m.compose(v, q, s); mesh.setMatrixAt(k, m);
+      });
+      mesh.castShadow = true;
+      this.scene.add(mesh);
+    }
+  }
+  /* ---------- リフト・テレキャビン（OSMの支柱位置） ---------- */
+  buildLifts() {
+    this.cables = [];
+    const pyl = [], stations = [];
+    const lineMat = new THREE.LineBasicMaterial({ color: 0x2b3038 });
+    // 支柱：Poly by Google「Ski lift pole」。滑車列の間隔（モデル単位 310）をケーブル間隔に合わせて縮尺
+    const pole = this.assets.pole ? this.makePoleGeometry(this.assets.pole) : null;
+    const sepOf = (g) => g ? 6 : 4.4;
+    const heightOf = (g) => pole ? pole.cableY * sepOf(g) / pole.span : (g ? 16 : 10);
+    for (const L of this.meta.lifts) {
+      const pts = L.pts, gondola = false;   // 全リフトをチェアリフトのモデルで表示（ゴンドラの無料モデルが無いため）
+      const H = heightOf(gondola);
+      const top = pts.map((p, i) => new THREE.Vector3(p[0], p[2] + ((i === 0 || i === pts.length - 1) ? (gondola ? 4.6 : 3.3) : H), p[1]));   // 駅ではケーブルを低く（降り場のスロープに足が届く高さ）
+      const a = top[0], b = top[top.length - 1], dx = b.x - a.x, dz = b.z - a.z, dl = Math.hypot(dx, dz);
+      pts.forEach((p, i) => {
+        if (i === 0 || i === pts.length - 1) {
+          const q2 = pts[i === 0 ? 1 : i - 1], ox = p[0] - q2[0], oz = p[1] - q2[1], ol = Math.hypot(ox, oz) || 1;
+          stations.push([p[0], p[2], p[1], ox / ol, oz / ol, gondola]);
+        } else pyl.push([p[0], p[2], p[1], H, gondola, Math.atan2(dx, dz)]);
+      });
+      // 上り・下りの2本のケーブル
+      const off = new THREE.Vector3(-dz / dl, 0, dx / dl).multiplyScalar(sepOf(gondola) / 2);
+      for (const sgn of [1, -1]) {
+        const line = top.map(p => p.clone().addScaledVector(off, sgn));
+        if (sgn < 0) line.reverse();
+        const cum = [0]; for (let i = 1; i < line.length; i++) cum.push(cum[i - 1] + line[i].distanceTo(line[i - 1]));
+        this.cables.push({ line, cum, len: cum[cum.length - 1], gondola });
+        if (sgn > 0) L.up = this.cables[this.cables.length - 1];
+        this.scene.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(line), lineMat));
+      }
+    }
+    const m = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3(), v = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0);
+    if (pole) {
+      const pm = new THREE.InstancedMesh(pole.geo, pole.mat, pyl.length);
+      pyl.forEach((p, i) => {
+        const sc = sepOf(p[4]) / pole.span;
+        q.setFromAxisAngle(up, p[5]); v.set(p[0], p[1] - 0.3, p[2]); s.set(sc, sc, sc);
+        m.compose(v, q, s); pm.setMatrixAt(i, m);
+      });
+      pm.castShadow = true; pm.frustumCulled = false; this.scene.add(pm);
+    } else {
+      const pg = new THREE.CylinderGeometry(0.35, 0.5, 1, 6); pg.translate(0, 0.5, 0);
+      const pm = new THREE.InstancedMesh(pg, new THREE.MeshLambertMaterial({ color: 0x8a939e }), pyl.length);
+      pyl.forEach((p, i) => { v.set(p[0], p[1] - 0.5, p[2]); s.set(1, p[3] + 0.5, 1); m.compose(v, q.identity(), s); pm.setMatrixAt(i, m); });
+      pm.castShadow = true; this.scene.add(pm);
+    }
+    // 駅：滑車を覆う屋根（地面から浮いた構造なので搬器・カメラが中に閉じ込められない）
+    const sg = new THREE.BoxGeometry(1, 1, 1);
+    const sm = new THREE.InstancedMesh(sg, new THREE.MeshLambertMaterial({ color: 0xb8bec6 }), stations.length);
+    const posts = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.35, 0.35, 1, 6), new THREE.MeshLambertMaterial({ color: 0x8a939e }), stations.length);
+    stations.forEach((p, i) => {
+      const w = p[5] ? 9 : 6, l = p[5] ? 12 : 8;
+      q.setFromAxisAngle(up, Math.atan2(p[3], p[4]));
+      v.set(p[0] + p[3] * (l / 2 - 1.5), p[1] + 5.2, p[2] + p[4] * (l / 2 - 1.5)); s.set(w, 1.4, l);
+      m.compose(v, q, s); sm.setMatrixAt(i, m);
+      v.set(p[0] + p[3] * (l - 2), p[1] + 2.25, p[2] + p[4] * (l - 2)); s.set(1, 4.5, 1);
+      m.compose(v, q, s); posts.setMatrixAt(i, m);
+    });
+    sm.castShadow = true; this.scene.add(sm, posts);
+    // 搬器：チェアは Poly by Google「Chairlift」、ゴンドラは簡易キャビン
+    const chair = this.assets.chair ? this.makeChairGeometry(this.assets.chair) : null;
+    let nG = 0, nC = 0;
+    for (const c of this.cables) { c.sp = c.gondola ? 45 : (LOW_END ? 40 : 28); c.n = Math.floor(c.len / c.sp); c.gondola ? nG += c.n : nC += c.n; }
+    const gGeo = makeGondolaGeometry(true);
+    const cGeo = chair ? chair.geo : (() => { const g = new THREE.BoxGeometry(1.8, 0.25, 0.7); g.translate(0, -2.2, 0); return g; })();
+    this.gMesh = new THREE.InstancedMesh(gGeo, new THREE.MeshLambertMaterial({ vertexColors: true }), Math.max(1, nG));
+    this.cMesh = new THREE.InstancedMesh(cGeo, chair ? chair.mat : new THREE.MeshLambertMaterial({ color: 0x33373e }), Math.max(1, nC));
+    this.gMesh.frustumCulled = this.cMesh.frustumCulled = false;
+    this.scene.add(this.gMesh, this.cMesh);
+    this.updateCarriers(0);
+    // プレイヤーが乗る搬器
+    const metal = new THREE.MeshLambertMaterial({ color: 0x3a3f46 });
+    let ride;
+    if (chair) { ride = new THREE.Group(); const cm = new THREE.Mesh(chair.geo, chair.mat); cm.castShadow = true; ride.add(cm); }
+    else {
+      ride = new THREE.Group(); this.seatDrop = 3.1;
+      const blue = new THREE.MeshLambertMaterial({ color: 0x2a6fb0 });
+      const hang = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 2.3, 6), metal); hang.position.y = -1.15; ride.add(hang);
+      const seat = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.1, 0.55), blue); seat.position.set(0, -2.3, 0); ride.add(seat);
+      const back = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.4, 0.08), blue); back.position.set(0, -2.05, 0.27); ride.add(back);
+    }
+    this.rideChair = ride;
+    const cab = this.rideCabin = new THREE.Group();
+    // 乗車中は車内から見るので、ガラスを抜いて内側も描く（窓枠・柱・床越しに景色が見える）
+    cab.add(new THREE.Mesh(makeGondolaGeometry(false), new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide })));
+    ride.visible = cab.visible = false;
+    this.scene.add(ride, cab);
+  }
+  // GLB内の全メッシュを1つのジオメトリに焼き込む（インスタンス描画で大量に並べるため）
+  bakeGLB(gltf) {
+    const scene = gltf.scene; scene.updateMatrixWorld(true);
+    const pos = [], nor = [], uv = [], v = new THREE.Vector3(), nm = new THREE.Matrix3();
+    let src = null;
+    scene.traverse(o => {
+      if (!o.isMesh) return;
+      src = src || o.material;
+      const g = o.geometry.index ? o.geometry.toNonIndexed() : o.geometry;
+      const p = g.attributes.position, n = g.attributes.normal, t = g.attributes.uv;
+      nm.getNormalMatrix(o.matrixWorld);
+      for (let i = 0; i < p.count; i++) {
+        v.fromBufferAttribute(p, i).applyMatrix4(o.matrixWorld); pos.push(v.x, v.y, v.z);
+        if (n) { v.fromBufferAttribute(n, i).applyMatrix3(nm).normalize(); nor.push(v.x, v.y, v.z); } else nor.push(0, 1, 0);
+        uv.push(t ? t.getX(i) : 0, t ? t.getY(i) : 0);
+      }
+    });
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    geo.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+    geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+    const mat = new THREE.MeshLambertMaterial({ map: src?.map || null, color: src?.color || 0xffffff });
+    return { geo, mat };
+  }
+  makePoleGeometry(gltf) {
+    const { geo, mat } = this.bakeGLB(gltf);
+    geo.computeBoundingBox(); const b = geo.boundingBox;
+    geo.translate(-(b.min.x + b.max.x) / 2, -b.min.y, -(b.min.z + b.max.z) / 2);
+    // モデル単位：滑車列は x = ±155、ケーブルが乗る高さは y ≈ 285
+    return { geo, mat, span: 310, cableY: 285 - b.min.y };
+  }
+  // 4人乗りチェア：吊り手の上端をケーブル位置(原点)に、座面を進行方向(-z)へ向ける
+  makeChairGeometry(gltf) {
+    const { geo, mat } = this.bakeGLB(gltf);
+    geo.computeBoundingBox(); const box = geo.boundingBox, H = box.max.y - box.min.y, p = geo.attributes.position;
+    let ax = 0, az = 0, na = 0, sx = 0, sz = 0, ns = 0;
+    for (let i = 0; i < p.count; i++) {
+      const x = p.getX(i), y = p.getY(i), z = p.getZ(i);
+      if (y > box.max.y - H * 0.04) { ax += x; az += z; na++; }
+      if (y < box.min.y + H * 0.35) { sx += x; sz += z; ns++; }
+    }
+    ax /= na; az /= na; sx /= ns; sz /= ns;
+    geo.translate(-ax, -box.max.y, -az);
+    // このモデルは座面が吊り手の後ろ側に張り出す形。背もたれ側を後ろにして進行方向(-z)を向かせる
+    const yaw = Math.atan2(sx - ax, -(sz - az)) + Math.PI;
+    geo.rotateY(yaw);
+    geo.computeBoundingBox();
+    const sc = 2.1 / (geo.boundingBox.max.x - geo.boundingBox.min.x);   // 4人掛けの幅 ≒ 2.1m
+    geo.scale(sc, sc, sc);
+    this.seatDrop = H * sc * 0.82 + 0.75;           // ケーブルから座面までの距離 + 腰の高さ分
+    // 座面中心の前後位置（吊り手の真下からのずれ）
+    const off = new THREE.Vector3(sx - ax, 0, sz - az).applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw).multiplyScalar(sc);
+    this.seatFwd = -off.z;
+    return { geo, mat };
+  }
+  cablePoint(c, d, pos, dir) {
+    d = clamp(d, 0, c.len - 0.001);
+    let i = 1; while (i < c.cum.length - 1 && c.cum[i] < d) i++;
+    const a = c.line[i - 1], b = c.line[i], f = (d - c.cum[i - 1]) / Math.max(0.01, c.cum[i] - c.cum[i - 1]);
+    pos.lerpVectors(a, b, f); dir.subVectors(b, a).normalize();
+    return pos;
+  }
+  updateCarriers(t) {
+    const m = new THREE.Matrix4(), v = new THREE.Vector3(), q = new THREE.Quaternion(), s = new THREE.Vector3(1, 1, 1), up = new THREE.Vector3(0, 1, 0);
+    let gi = 0, ci = 0;
+    for (const c of this.cables) {
+      const speed = c.gondola ? 5 : 2.3;
+      for (let k = 0; k < c.n; k++) {
+        const d = (k * c.sp + t * speed) % c.len;
+        let i = 1; while (i < c.cum.length - 1 && c.cum[i] < d) i++;
+        const a = c.line[i - 1], b = c.line[i], f = (d - c.cum[i - 1]) / Math.max(0.01, c.cum[i] - c.cum[i - 1]);
+        v.lerpVectors(a, b, f);
+        q.setFromAxisAngle(up, Math.atan2(b.x - a.x, b.z - a.z) + (c.gondola ? 0 : Math.PI));
+        m.compose(v, q, s);
+        if (c.gondola) this.gMesh.setMatrixAt(gi++, m); else this.cMesh.setMatrixAt(ci++, m);
+      }
+    }
+    this.gMesh.instanceMatrix.needsUpdate = true; this.cMesh.instanceMatrix.needsUpdate = true;
+  }
+
+  /* ---------- スキーヤー（3Dモデル） ---------- */
+  makeSkier(gltf) {
+    const root = this.skier = new THREE.Group();
+    const lean = this.leanG = new THREE.Group(); root.add(lean);
+    const model = gltf.scene;
+    model.traverse(o => { if (o.isMesh) { o.castShadow = true; if (o.material) o.material.side = THREE.FrontSide; } });
+    // 板の向きを進行方向(-z)へ合わせ、足元を原点に
+    const holder = new THREE.Group(); holder.add(model);
+    holder.quaternion.setFromUnitVectors(new THREE.Vector3(...SKIER_FIX.tip).normalize(), new THREE.Vector3(0, 0, -1));
+    holder.rotateOnWorldAxis(new THREE.Vector3(0, 0, 1), SKIER_FIX.roll);
+    holder.updateMatrixWorld(true);
+    // 回転後の頂点で正確に測る（Box3.setFromObject は回転した外接箱で膨らむため使わない）
+    const box = new THREE.Box3(), v = new THREE.Vector3();
+    model.traverse(o => {
+      if (!o.isMesh) return;
+      const p = o.geometry.attributes.position;
+      for (let i = 0; i < p.count; i++) box.expandByPoint(v.fromBufferAttribute(p, i).applyMatrix4(o.matrixWorld));
+    });
+    const size = box.getSize(new THREE.Vector3());
+    const sc = 1.85 / size.z;   // 板の長さ（元モデルの最長寸法）を 1.85m に
+    const wrap = new THREE.Group(); wrap.add(holder); wrap.scale.setScalar(sc);
+    const c = box.getCenter(new THREE.Vector3());
+    holder.position.set(-c.x, -box.min.y, -c.z);
+    lean.add(wrap);
+    // 接地影（板の下の柔らかい影）：足元が雪に接している感じを出す
+    const sh = document.createElement('canvas'); sh.width = sh.height = 64;
+    const sg = sh.getContext('2d'), rg = sg.createRadialGradient(32, 32, 2, 32, 32, 31);
+    rg.addColorStop(0, 'rgba(25,40,65,0.55)'); rg.addColorStop(0.6, 'rgba(25,40,65,0.25)'); rg.addColorStop(1, 'rgba(25,40,65,0)');
+    sg.fillStyle = rg; sg.fillRect(0, 0, 64, 64);
+    const contact = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 2.1), new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(sh), transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 }));
+    contact.rotation.x = -Math.PI / 2; contact.position.y = 0.02;
+    root.add(contact); this.contact = contact;
+    this.scene.add(root);
+    this.skierSize = size.clone().multiplyScalar(sc);
+  }
+  makeParticles() {
+    const n = this.pN = 260;
+    this.pPos = new Float32Array(n * 3); this.pVel = new Float32Array(n * 3); this.pLife = new Float32Array(n);
+    const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.BufferAttribute(this.pPos, 3));
+    this.particles = new THREE.Points(geo, new THREE.PointsMaterial({ color: 0xffffff, size: 0.13, transparent: true, opacity: 0.9 }));
+    this.particles.frustumCulled = false;
+    this.scene.add(this.particles);
+    this.pNext = 0;
+  }
+  makeFlakes() {
+    const n = this.fN = 500;
+    this.fPos = new Float32Array(n * 3);
+    for (let i = 0; i < n; i++) { this.fPos[i * 3] = (Math.random() - 0.5) * 60; this.fPos[i * 3 + 1] = Math.random() * 14; this.fPos[i * 3 + 2] = (Math.random() - 0.5) * 60; }
+    const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.BufferAttribute(this.fPos, 3));
+    this.flakes = new THREE.Points(geo, new THREE.PointsMaterial({ color: 0xffffff, size: 0.07, transparent: true, opacity: 0.85, depthWrite: false }));
+    this.flakes.frustumCulled = false;
+    this.scene.add(this.flakes);
+  }
+  updateFlakes(dt) {
+    const cam = this.camera.position, P = this.fPos, R = 30;
+    for (let i = 0; i < this.fN; i++) {
+      const k = i * 3;
+      P[k + 1] -= dt * 0.8; P[k] += dt * 0.4;
+      const dx = P[k] - cam.x, dy = P[k + 1] - cam.y, dz = P[k + 2] - cam.z;
+      if (dx > R) P[k] -= 2 * R; else if (dx < -R) P[k] += 2 * R;
+      if (dz > R) P[k + 2] -= 2 * R; else if (dz < -R) P[k + 2] += 2 * R;
+      if (dy < -6) P[k + 1] += 18; else if (dy > 12) P[k + 1] -= 18;
+    }
+    this.flakes.geometry.attributes.position.needsUpdate = true;
+  }
+  newLine(init) {
+    return { a: Math.random() * Math.PI * 2, r: init ? Math.random() : 0.15 + Math.random() * 0.2, len: 0.08 + Math.random() * 0.18, w: 0.6 + Math.random() * 1.6, sp: 0.8 + Math.random() * 1.2 };
+  }
+  drawFx(dt, f) {
+    const g = this.fxg, W = innerWidth, H = innerHeight;
+    g.clearRect(0, 0, W, H);
+    if (f <= 0.01) return;
+    const cx = W / 2, cy = H * 0.52, R = Math.hypot(W, H) * 0.6;
+    g.lineCap = 'round';
+    for (const L of this.lines) {
+      L.r += L.sp * dt * (0.6 + f * 2.4) * (0.4 + L.r);
+      if (L.r > 1.1) Object.assign(L, this.newLine(false));
+      const r0 = L.r * R, r1 = (L.r + L.len * (0.5 + f)) * R;
+      if (r0 < R * 0.3) continue;
+      const ca = Math.cos(L.a), sa = Math.sin(L.a);
+      g.strokeStyle = `rgba(255,255,255,${(0.35 * f * Math.min(1, (L.r - 0.3) * 3)).toFixed(3)})`;
+      g.lineWidth = L.w * (0.6 + f);
+      g.beginPath(); g.moveTo(cx + ca * r0, cy + sa * r0); g.lineTo(cx + ca * r1, cy + sa * r1); g.stroke();
+    }
+    const vg = g.createRadialGradient(cx, cy, R * 0.45, cx, cy, R);
+    vg.addColorStop(0, 'rgba(10,25,40,0)'); vg.addColorStop(1, `rgba(10,25,40,${(0.22 * f).toFixed(3)})`);
+    g.fillStyle = vg; g.fillRect(0, 0, W, H);
+  }
+
+  /* ---------- コース読み込み ---------- */
+  load(def) {
+    this.routeGroup.children.slice().forEach(o => { this.routeGroup.remove(o); o.traverse(m => { m.geometry?.dispose(); if (m.material && m.material !== this.mat.piste) [].concat(m.material).forEach(mm => { mm.map?.dispose(); mm.dispose(); }); }); });
+    const R = this.route = new Route(def, this.T);
+    this.lift = null;
+    for (const L of this.meta.lifts) {
+      const t = L.pts[L.pts.length - 1], dd = Math.hypot(t[0] - R.x[0], t[1] - R.z[0]);
+      if (L.up && dd < 150 && (!this.lift || dd < this.lift.dist)) this.lift = { name: L.name, cable: L.up, gondola: false, top: t, dist: dd };
+    }
+    this.startI = 6;
+    if (this.lift) {   // 降り場から一番近いコース上の点からスタート
+      let bi = 6, bd = Infinity;
+      for (let i = 6; i < Math.min(R.N, 120); i++) { const d = Math.hypot(R.x[i] - this.lift.top[0], R.z[i] - this.lift.top[1]); if (d < bd) { bd = d; bi = i; } }
+      this.startI = bi;
+    }
+    this.sinkNearUnder(R);
+    this.buildPiste(); this.buildNets(); this.buildSigns(); this.buildTrail();
+    this.reset();
+  }
+  pisteCols(i) {
+    const R = this.route, hl = R.hwL[i], hr = R.hwR[i], ml = R.exL[i] - hl, mr = R.exR[i] - hr;
+    const d = [-(hl + ml), -(hl + ml * 0.55), -(hl + ml * 0.2)], lift = [-1.4, -0.25, 0.2];
+    for (let k = 0; k <= 10; k++) { d.push(-hl + (hl + hr) * k / 10); lift.push(0.25); }
+    d.push(hr + mr * 0.2, hr + mr * 0.55, hr + mr); lift.push(0.2, -0.25, -1.4);
+    return [d, lift];
+  }
+  buildPiste() {
+    const R = this.route, T = this.T, cols = 17, rows = R.N;
+    const pos = new Float32Array(rows * cols * 3), uv = new Float32Array(rows * cols * 2), col = new Float32Array(rows * cols * 3), p = this.tmp;
+    for (let i = 0; i < rows; i++) {
+      const [ds, lifts] = this.pisteCols(i);
+      for (let j = 0; j < cols; j++) {
+        R.point(i, ds[j], T, p);
+        const k = i * cols + j;
+        pos.set([p.x, p.y + lifts[j], p.z], k * 3);
+        uv.set([ds[j] / 4.5, i * 2 / 4.5], k * 2);
+        const edge = j < 3 || j > 13 ? 0.94 : 1;
+        col.set([edge, edge, edge], k * 3);
+      }
+    }
+    const idx = new Uint32Array((rows - 1) * (cols - 1) * 6); let q = 0;
+    for (let i = 0; i < rows - 1; i++) for (let j = 0; j < cols - 1; j++) {
+      const a = i * cols + j, b = a + cols, c = a + 1, d = b + 1;
+      idx[q++] = a; idx[q++] = c; idx[q++] = b; idx[q++] = c; idx[q++] = d; idx[q++] = b;
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+    geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    geo.setIndex(new THREE.BufferAttribute(idx, 1));
+    geo.computeVertexNormals();
+    const mesh = new THREE.Mesh(geo, this.mat.piste); mesh.receiveShadow = true;
+    this.routeGroup.add(mesh);
+  }
+  surfY(x, z, d, i) {   // ゲレンデ面の高さ（リボンと同じ持ち上げ量）
+    return this.T.h(x, z) + 0.25;
+  }
+  buildNets() {
+    const R = this.route, T = this.T, p = this.tmp, poles = [], lineL = [], lineR = [];
+    for (let i = 0; i < R.N; i += 6) {
+      for (const side of [-1, 1]) {
+        const d = side < 0 ? -(R.hwL[i] + 3.5) : R.hwR[i] + 3.5;
+        R.point(i, d, T, p); poles.push([p.x, p.y, p.z]);
+        (side < 0 ? lineL : lineR).push(p.x, p.y + 1.2, p.z);
+      }
+    }
+    const m = new THREE.Matrix4();
+    const pg = new THREE.CylinderGeometry(0.05, 0.05, 1.4, 5); pg.translate(0, 0.7, 0);
+    const pm = new THREE.InstancedMesh(pg, new THREE.MeshLambertMaterial({ color: 0xff7a1a }), poles.length);
+    poles.forEach((t, i) => { m.makeTranslation(t[0], t[1], t[2]); pm.setMatrixAt(i, m); });
+    pm.frustumCulled = false;
+    this.routeGroup.add(pm);
+    for (const arr of [lineL, lineR]) {
+      const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(arr, 3));
+      this.routeGroup.add(new THREE.Line(g, new THREE.LineBasicMaterial({ color: 0xff7a1a })));
+    }
+  }
+  signTexture(lines, bg, stripe) {
+    const c = document.createElement('canvas'); c.width = 512; c.height = 256;
+    const g = c.getContext('2d');
+    g.fillStyle = bg; g.fillRect(0, 0, 512, 256);
+    if (stripe) stripe.forEach((col, i) => { g.fillStyle = col; g.fillRect(i * 512 / stripe.length, 0, 512 / stripe.length, 26); });
+    g.fillStyle = '#fff'; g.textAlign = 'center';
+    lines.forEach(([txt, size, y]) => { g.font = `900 ${size}px "Zen Kaku Gothic New", sans-serif`; g.fillText(txt, 256, y, 480); });
+    const t = new THREE.CanvasTexture(c); t.encoding = THREE.sRGBEncoding; return t;
+  }
+  addBoard(i, d, tex, w, h, yy) {
+    const R = this.route, p = R.point(i, d, this.T, this.tmp);
+    const g = new THREE.Group(); g.position.set(p.x, p.y, p.z); g.rotation.y = -R.psi[i];
+    const board = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide, toneMapped: false }));
+    board.position.y = yy; g.add(board);
+    this.routeGroup.add(g);
+    return g;
+  }
+  buildSigns() {
+    const R = this.route, def = R.def;
+    const post = new THREE.MeshLambertMaterial({ color: 0x3a3f46 });
+    def.segs.forEach((sg, k) => {
+      const i = Math.min(R.N - 1, def.segStart[k] + (k ? 5 : 9));
+      const stripe = [...sg.level.replace(/級/g, '')].map(ch => LEVEL_COL[ch]).filter(Boolean);
+      const tex = this.signTexture([[sg.name, sg.name.length > 10 ? 44 : 56, 110], [`公式 ${sg.len}m  平均${sg.avg}°  最大${sg.max}°`, 32, 170], [sg.level, 30, 222]], '#0F2536', stripe);
+      const g = this.addBoard(i, R.hwR[i] - 2.5, tex, 3.2, 1.6, 2.6);
+      const pl = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 2.0, 6), post); pl.position.y = 1.0; g.add(pl);
+    });
+    const fi = Math.round(R.finishS / 2), bw = Math.min(R.hwL[fi] + R.hwR[fi] - 4, 30);
+    const g = this.addBoard(fi, (R.hwR[fi] - R.hwL[fi]) / 2, this.signTexture([['GOAL', 120, 150], [def.to + '  ' + def.botAlt + 'm', 36, 222]], '#E03A3E'), bw, bw / 4, 3 + bw / 8);
+    for (const sx of [-1, 1]) { const pl = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.15, 3 + bw / 4, 8), new THREE.MeshLambertMaterial({ color: 0xE03A3E })); pl.position.set(sx * bw / 2, (3 + bw / 4) / 2, 0); g.add(pl); }
+    this.addBoard(12, -R.hwL[12] + 2, this.signTexture([[def.frm, def.frm.length > 8 ? 40 : 56, 120], [def.topAlt + 'm  START', 40, 190]], '#0F2536', ['#F2C230']), 3.2, 1.6, 2.6);
+  }
+  buildTrail() {
+    const MAX = this.trailMax = 9000;
+    this.trailS = new Float32Array(MAX); this.trailD = new Float32Array(MAX);
+    const pos = this.trailPos = new Float32Array(MAX * 2 * 3), uv = new Float32Array(MAX * 4);
+    const idx = new Uint32Array((MAX - 1) * 6);
+    for (let i = 0; i < MAX - 1; i++) { const a = i * 2; idx.set([a, a + 1, a + 2, a + 1, a + 3, a + 2], i * 6); }
+    for (let i = 0; i < MAX; i++) uv.set([0, i * 0.5, 1, i * 0.5], i * 4);
+    const geo = this.trailGeo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+    geo.setIndex(new THREE.BufferAttribute(idx, 1));
+    geo.setDrawRange(0, 0);
+    const c = document.createElement('canvas'); c.width = 16; c.height = 1;
+    const g = c.getContext('2d'); g.fillStyle = 'rgba(120,150,185,0.42)'; g.fillRect(1, 0, 3, 1); g.fillRect(12, 0, 3, 1);
+    const tex = new THREE.CanvasTexture(c); tex.magFilter = THREE.NearestFilter;
+    const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
+    mesh.frustumCulled = false;
+    this.routeGroup.add(mesh);
+  }
+  pushTrail() {
+    if (this.trailN >= this.trailMax) return;
+    const st = this.st, i = this.trailN++;
+    this.trailS[i] = st.s; this.trailD[i] = st.d;
+    const y = this.T.h(st.x, st.z) + 0.28, rx = Math.cos(st.phi) * 0.22, rz = Math.sin(st.phi) * 0.22;
+    this.trailPos.set([st.x - rx, y, st.z - rz, st.x + rx, y, st.z + rz], i * 6);
+    this.trailGeo.attributes.position.needsUpdate = true;
+    this.trailGeo.setDrawRange(0, Math.max(0, (this.trailN - 1) * 6));
+  }
+
+  /* ---------- 状態 ---------- */
+  reset() {
+    const R = this.route, i0 = this.startI || 6;
+    this.st = { x: R.x[i0], z: R.z[i0], phi: R.psi[i0], v: 1.5, i: i0, s: i0 * 2, d: 0, th: 0, pL: 0, pR: 0, e: 0, omega: 0, lean: 0,
+      time: 0, maxV: 0, turns: 0, side: 0, nets: 0, seg: -1, finished: false, finishT: 0, finishT2: 0, trailAcc: 0, skid: 0, slopeDeg: 0 };
+    const g0 = this.T.grad(R.x[i0], R.z[i0], this.g2); this.st.slopeDeg = Math.atan(Math.hypot(g0[0], g0[1])) / DEG;
+    this.trailN = 0; this.trailGeo.setDrawRange(0, 0);
+    this.camYaw = R.psi[i0]; this.camInit = false;
+    this.pLife.fill(0);
+    this.skier.visible = true; if (this.contact) this.contact.visible = true;
+    this.chairAway = false; this.dropT = undefined;
+    if (this.rideChair) this.rideChair.visible = this.rideCabin.visible = false;
+  }
+  startRun() {
+    this.reset(); this.sfx.init();
+    this.paused = false;
+    if (this.lift) {
+      this.mode = 'lift'; this.liftPhase = 'ride';
+      this.liftD = Math.max(0, this.lift.cable.len - 55);
+      this.cb.lift({ active: true, phase: 'ride', name: this.lift.name, gondola: this.lift.gondola, remain: Math.round(this.lift.cable.len - this.liftD) });
+    } else {
+      this.mode = 'countdown'; this.cd = 3.0; this.cb.countdown(3);
+    }
+  }
+  /* ---------- リフト乗車 → 降りたらそのままスタート ---------- */
+  updateLiftState(dt) {
+    const c = this.lift.cable;
+    let remain = c.len - this.liftD;
+    this.liftD += (remain > 14 ? 7 : 3) * dt;
+    remain = c.len - this.liftD;
+    if (remain <= 0.4) {
+      this.liftD = c.len - 25; this.liftPhase = 'ride';
+      this.cb.lift({ phase: 'missed' });
+    } else {
+      const ph = remain < 11 ? 'window' : 'ride';
+      if (ph !== this.liftPhase) { this.liftPhase = ph; this.cb.lift({ phase: ph }); }
+    }
+    this.liftUiT = (this.liftUiT || 0) + dt;
+    if (this.liftUiT > 0.1) { this.liftUiT = 0; this.cb.lift({ remain: Math.max(0, Math.round(c.len - this.liftD)) }); }
+  }
+  liftPose(P, D) {   // 搬器の位置（地形の凸部でも雪に埋まらない）と水平の進行方向
+    this.cablePoint(this.lift.cable, this.liftD, P, D);
+    P.y = Math.max(P.y, this.T.h(P.x, P.z) + (this.lift.gondola ? 4.65 : 3.35));
+    const hd = Math.hypot(D.x, D.z) || 1;
+    D.set(D.x / hd, 0, D.z / hd);
+    return Math.atan2(D.x, -D.z);
+  }
+  tapLift() {
+    if (this.mode !== 'lift' || this.paused) return;
+    if (this.liftPhase !== 'window') { this.cb.lift({ phase: 'early' }); return; }
+    const P = new THREE.Vector3(), D = new THREE.Vector3(), h = this.liftPose(P, D);
+    const st = this.st, R = this.route;
+    // 降り場へ滑り出す：リフトの進行方向・速度のまま雪面へ。ここから計測開始
+    st.x = P.x + D.x * 0.6; st.z = P.z + D.z * 0.6; st.phi = h; st.v = 5.5;
+    const pr = R.project(st.x, st.z, this.startI); st.i = pr.i; st.s = pr.s; st.d = pr.d;
+    st.free = true;                         // コース（ネットの内側）に入るまでネット判定なし
+    const ai = Math.min(R.N - 1, this.startI + 35);
+    st.aim = { x: R.x[ai], z: R.z[ai] };    // 最初のターンだけ自動でコース方向へ
+    this.dropH = (P.y - (this.lift.gondola ? 4.05 : this.seatDrop)) - (this.T.h(st.x, st.z) + 0.25); this.dropT = 0;
+    this.chairAway = true;
+    this.skier.visible = true; this.contact.visible = true;
+    this.camYaw = h;
+    this.mode = 'run';
+    this.cb.lift({ active: false, phase: '' });
+    this.cb.go();
+  }
+  // ストックで漕ぐ：遅いほど効く。連打は 0.3 秒間隔まで
+  push() {
+    const st = this.st;
+    if (this.mode !== 'run' || this.paused || !st || st.finished || (this.pushCd || 0) > 0) return false;
+    this.pushCd = 0.3; this.pushT = 0;
+    st.v += 2.5 * Math.max(0.15, 1 - st.v / 14);   // 止まっていると +9km/h、40km/h超では +1.3km/h 程度
+    return true;
+  }
+  skipLift() { if (this.mode === 'lift') this.liftD = Math.max(this.liftD, this.lift.cable.len - 12); }
+  updateRideCarrier(dt) {
+    const P = this.tmpV || (this.tmpV = new THREE.Vector3()), D = this.tmpD || (this.tmpD = new THREE.Vector3());
+    if (this.chairAway) {                    // 降りた後も搬器は駅へ進んで消える
+      this.liftD += 3 * dt;
+      if (this.liftD >= this.lift.cable.len - 0.2) { this.chairAway = false; this.rideChair.visible = this.rideCabin.visible = false; return null; }
+    }
+    const h = this.liftPose(P, D);
+    const g = this.lift.gondola ? this.rideCabin : this.rideChair;
+    g.visible = true; g.position.copy(P); g.rotation.set(0, -h, 0);
+    return h;
+  }
+  updateLiftVisuals(dt) {
+    const h = this.updateRideCarrier(0), P = this.tmpV, D = this.tmpD;
+    const dx = D.x, dz = D.z;
+    this.skier.visible = !this.lift.gondola; this.contact.visible = false;
+    const f = (this.seatFwd || 0) * 0.6;
+    this.skier.position.set(P.x + dx * f, P.y - this.seatDrop, P.z + dz * f);
+    this.skier.rotation.set(0, -h, 0, 'YXZ'); this.leanG.rotation.z = 0; this.st.lean = 0;
+    const cam = this.camera;
+    if (this.lift.gondola) {   // キャビンの窓から前方を見る
+      cam.position.set(P.x + dx * 0.15, P.y - 2.7, P.z + dz * 0.15);
+      cam.up.set(0, 1, 0);
+      cam.lookAt(P.x + dx * 30, P.y - 4.2, P.z + dz * 30);
+    } else {                   // 後ろやや右上から、肩越しに降り場を見る
+      const cx = P.x - dx * 5.2 - dz * 1.4, cz = P.z - dz * 5.2 + dx * 1.4;
+      cam.position.set(cx, Math.max(P.y - 1.3, this.T.h(cx, cz) + 1.8), cz);
+      cam.up.set(0, 1, 0);
+      cam.lookAt(P.x + dx * 9, P.y - 3.8, P.z + dz * 9);
+    }
+    if (Math.abs(cam.fov - 62) > 0.1) { cam.fov = 62; cam.updateProjectionMatrix(); }
+    this.camYaw = h; this.camInit = true;
+  }
+  setPaused(p) { this.paused = p; }
+
+  step(dt) {
+    const st = this.st, R = this.route, T = this.T, inp = this.input;
+    // 降車直後：最初のターンだけ自動でコース方向へ（プレイヤーが操作したら即解除）
+    let aL = false, aR = false;
+    if (st.aim) {
+      if (inp.L || inp.R) st.aim = null;
+      else {
+        const df = wrapA(Math.atan2(st.aim.x - st.x, -(st.aim.z - st.z)) - st.phi);
+        if (Math.abs(df) < 0.12) st.aim = null; else if (df > 0) aL = true; else aR = true;
+      }
+    }
+    const L = inp.L || inp.forcePlow || aL, Rr = inp.R || inp.forcePlow || aR;
+    st.pL = clamp(st.pL + (L ? 3.2 : -4.5) * dt, 0, 1);
+    st.pR = clamp(st.pR + (Rr ? 3.2 : -4.5) * dt, 0, 1);
+    const e = st.e = st.pL - st.pR;           // + = 右ターン（左足荷重）
+    const plow = Math.min(st.pL, st.pR);
+    const v = st.v;
+    const g = T.grad(st.x, st.z, this.g2);
+    const dx = Math.sin(st.phi), dz = -Math.cos(st.phi);
+    const sl = g[0] * dx + g[1] * dz;          // 進行方向の勾配（負 = 下り）
+    const cosA = 1 / Math.sqrt(1 + g[0] * g[0] + g[1] * g[1]);
+    st.slopeDeg = Math.acos(cosA) / DEG;
+    st.th = wrapA(st.phi - Math.atan2(-g[0], g[1]));
+    const omega = st.omega = e * Math.max(1.5, v / (4 + 0.4 * v));
+    st.phi = wrapA(st.phi + omega * dt);
+    let acc = -G * sl / Math.sqrt(1 + sl * sl) - 0.045 * G * cosA - 0.0032 * v * v
+      - Math.abs(e) * (0.35 + 0.03 * v) - plow * (2.8 + 0.12 * v);
+    const latG = v * Math.abs(omega) / G;
+    st.skid = latG > 1.3 ? latG - 1.3 : 0;
+    acc -= st.skid * 6;
+    // 緩斜面・平地ではスケーティングで少し前へ
+    const rel = Math.abs(wrapA(st.phi - R.psi[st.i]));
+    if (!st.finished && v < 6 && plow < 0.3 && rel < 1.4 && sl > -0.08) acc += 1.3;
+    if (st.free) acc += 1.6;              // 降車直後はコースに入るまで漕いで進む
+    if (st.finished) acc -= 5;
+    const hwL = R.hwL[st.i], hwR = R.hwR[st.i];
+    if (!st.free && (st.d < -hwL || st.d > hwR)) acc -= 1.5 + 0.02 * v * v;
+    st.v = Math.max(0, v + acc * dt);
+    const vh = st.v / Math.sqrt(1 + sl * sl);
+    st.x += dx * vh * dt; st.z += dz * vh * dt;
+    const p = R.project(st.x, st.z, st.i);
+    st.i = p.i; st.s = clamp(p.s, 0, R.len); st.d = p.d;
+    const lim = st.d < 0 ? hwL + 3.2 : hwR + 3.2;
+    if (st.free && !st.aim && Math.abs(st.d) < lim - 1) st.free = false;
+    if (!st.free && Math.abs(st.d) > lim) {
+      const sgn = Math.sign(st.d), ps = R.psi[st.i], dd = sgn * lim;
+      st.x = R.x[st.i] + Math.cos(ps) * dd + Math.sin(ps) * (st.s - st.i * 2);
+      st.z = R.z[st.i] + Math.sin(ps) * dd - Math.cos(ps) * (st.s - st.i * 2);
+      st.d = dd;
+      if (st.v > 3) { st.nets++; this.cb.net(); Haptics.pulse(60); }
+      st.v *= 0.35; st.phi = ps - sgn * 0.35;
+    }
+    if (st.s >= R.len - 2) st.v = Math.min(st.v, 0.5);
+    if (e > 0.55 && st.side !== 1) { if (st.side) st.turns++; st.side = 1; }
+    if (e < -0.55 && st.side !== -1) { if (st.side) st.turns++; st.side = -1; }
+    st.maxV = Math.max(st.maxV, st.v);
+    const seg = R.seg[st.i];
+    if (seg !== st.seg && !st.finished) { st.seg = seg; this.cb.segment(R.def.segs[seg]); }
+    if (!st.finished) {
+      st.time += dt;
+      if (st.s >= R.finishS) { st.finished = true; st.finishT = st.time; Haptics.pulse([40, 60, 40]); }
+    } else st.finishT2 += dt;
+    // エッジが立って高速で曲がっている間は細かく振動（Androidのみ）
+    this.rumbleT = (this.rumbleT || 0) - dt;
+    if (Math.abs(e) > 0.6 && v > 8 && this.rumbleT <= 0) { this.rumbleT = 0.16 - Math.min(0.08, v * 0.002); Haptics.pulse(Math.round(4 + Math.abs(e) * 6 + st.skid * 10)); }
+    st.trailAcc += st.v * dt;
+    if (st.trailAcc > 0.6) { st.trailAcc = 0; this.pushTrail(); }
+  }
+
+  frame(t) {
+    const dt = Math.min(0.05, (t - this.last) / 1000); this.last = t;
+    this.clock += dt;
+    if (this.route) {
+      const st = this.st;
+      if (this.mode === 'run' && !this.paused) {
+        const n = Math.ceil(dt / 0.008);
+        this.pushCd = Math.max(0, (this.pushCd || 0) - dt);
+        for (let i = 0; i < n; i++) this.step(dt / n);
+        if (st.finished) {
+          this.input.forcePlow = true;
+          if (st.v < 1.5 || st.finishT2 > 4) { this.mode = 'done'; this.input.forcePlow = false; this.cb.finish(this.resultData()); }
+        }
+      } else if (this.mode === 'lift' && !this.paused) {
+        this.updateLiftState(dt);
+      } else if (this.mode === 'countdown' && !this.paused) {
+        const prev = Math.ceil(this.cd); this.cd -= dt;
+        const now = Math.ceil(this.cd);
+        if (now !== prev) this.cb.countdown(Math.max(0, now));
+        if (this.cd <= 0) { this.mode = 'run'; this.cb.countdown(0); }
+      }
+      this.updateVisuals(dt);
+      if (this.mode === 'run' || this.mode === 'countdown') {
+        this.hudT = (this.hudT || 0) + dt;
+        if (this.hudT > 0.1) { this.hudT = 0; this.cb.hud(this.hudData()); }
+        this.drawMinimap();
+        this.cb.gauges(st.pL, st.pR, st.e);
+      }
+      this.sfx.update(st.v, st.e, this.mode === 'run' && !this.paused);
+    }
+    this.carrierT = (this.carrierT || 0) + dt;
+    if (this.carrierT > 0.05) { this.updateCarriers(this.clock); this.carrierT = 0; }
+    this.renderer.render(this.scene, this.camera);
+    requestAnimationFrame(t2 => this.frame(t2));
+  }
+
+  updateVisuals(dt) {
+    if (this.mode === 'lift') { this.updateLiftVisuals(dt); this.visualTail(dt, this.skier.position); return; }
+    if (this.chairAway && !this.paused) this.updateRideCarrier(dt);
+    const st = this.st, R = this.route, T = this.T;
+    const y = T.h(st.x, st.z) + 0.25, h = st.phi;
+    this.skier.position.set(st.x, y, st.z);
+    const g = T.grad(st.x, st.z, this.g2);
+    const sl = g[0] * Math.sin(h) - g[1] * Math.cos(h), sr = g[0] * Math.cos(h) + g[1] * Math.sin(h);
+    this.skier.rotation.set(Math.atan(sl), -h, Math.atan(sr) * 0.7, 'YXZ');
+    const targetLean = clamp(Math.atan(-st.omega * st.v / G), -1.05, 1.05) * (this.mode === 'run' ? 1 : 0);
+    st.lean += (targetLean - st.lean) * (1 - Math.exp(-dt * 10));
+    this.leanG.rotation.z = st.lean;
+    if (this.pushT !== undefined && this.pushT < 0.35) { if (!this.paused) this.pushT += dt; this.leanG.rotation.x = -0.35 * Math.sin(Math.PI * Math.min(1, this.pushT / 0.35)); } else this.leanG.rotation.x = 0;
+    if (this.dropT !== undefined && this.dropT < 0.35) { if (!this.paused) this.dropT += dt; const k = Math.min(1, this.dropT / 0.35); this.skier.position.y += Math.max(0, this.dropH) * (1 - k) * (1 - k); }
+
+    // 雪しぶき
+    const plow = Math.min(st.pL, st.pR);
+    const spray = Math.abs(st.e) * st.v * (1 + st.skid * 3) + plow * st.v * 1.5;
+    if (this.mode === 'run' && spray > 5) {
+      const n = Math.min(8, Math.floor(spray / 5)), out = -Math.sign(st.e || 1);
+      const rx = Math.cos(h), rz = Math.sin(h), fx = Math.sin(h), fz = -Math.cos(h);
+      for (let i = 0; i < n; i++) {
+        const k = this.pNext = (this.pNext + 1) % this.pN;
+        this.pPos[k * 3] = st.x + rx * out * 0.3 + fx * Math.random() * 0.6; this.pPos[k * 3 + 1] = y + 0.1; this.pPos[k * 3 + 2] = st.z + rz * out * 0.3 + fz * Math.random() * 0.6;
+        const sp = 1.5 + Math.random() * 2.5;
+        this.pVel[k * 3] = rx * out * sp + fx * st.v * 0.5; this.pVel[k * 3 + 1] = 1 + Math.random() * 2; this.pVel[k * 3 + 2] = rz * out * sp + fz * st.v * 0.5;
+        this.pLife[k] = 0.5 + Math.random() * 0.4;
+      }
+    }
+    for (let k = 0; k < this.pN; k++) {
+      if (this.pLife[k] <= 0) { this.pPos[k * 3 + 1] = -1e5; continue; }
+      this.pLife[k] -= dt; this.pVel[k * 3 + 1] -= 6 * dt;
+      this.pPos[k * 3] += this.pVel[k * 3] * dt; this.pPos[k * 3 + 1] += this.pVel[k * 3 + 1] * dt; this.pPos[k * 3 + 2] += this.pVel[k * 3 + 2] * dt;
+    }
+    this.particles.geometry.attributes.position.needsUpdate = true;
+
+    // カメラ
+    const cam = this.camera;
+    if (this.mode === 'idle') {
+      const ang = h + Math.PI + Math.sin(this.clock * 0.18) * 0.9, dist = 8;
+      const cx = st.x + Math.sin(ang) * dist, cz = st.z - Math.cos(ang) * dist;
+      cam.position.set(cx, Math.max(T.h(cx, cz), y) + 2.6, cz);
+      if (cam.fov !== 58) { cam.fov = 58; cam.updateProjectionMatrix(); }
+      cam.lookAt(st.x + Math.sin(h) * 20, y - 2, st.z - Math.cos(h) * 20);
+    } else {
+      this.camYaw = this.camInit ? lerpAngle(this.camYaw, h, 1 - Math.exp(-dt * 3.8)) : h;
+      const sf = this.speedF = clamp((st.v * 3.6 - 45) / 60, 0, 1);
+      const back = 3.6 - sf * 0.3, low = sf * 0.3;
+      const cx = st.x - Math.sin(this.camYaw) * back, cz = st.z + Math.cos(this.camYaw) * back;
+      const ty = Math.max(T.h(cx, cz) + 0.9, y + 1.9 - low * 0.5);   // 急斜面でもカメラが高く離れすぎない
+      if (!this.camInit) { cam.position.set(cx, ty, cz); this.camInit = true; }
+      const k = 1 - Math.exp(-dt * 14);
+      cam.position.x += (cx - cam.position.x) * k; cam.position.y += (ty - cam.position.y) * k; cam.position.z += (cz - cam.position.z) * k;
+      const fov = 60 + Math.min(st.v, 34) * 0.4;
+      if (Math.abs(cam.fov - fov) > 0.05) { cam.fov += (fov - cam.fov) * 0.08; cam.updateProjectionMatrix(); }
+      const ax = st.x + Math.sin(this.camYaw) * 7, az = st.z - Math.cos(this.camYaw) * 7, ay = T.h(ax, az) + 0.25;
+      cam.lookAt(ax, ay - 0.1 + (y - ay) * 0.9, az);
+      cam.rotateZ(st.lean * (0.2 + sf * 0.05));
+      if (!REDUCED && this.mode === 'run' && !this.paused && sf > 0) {
+        const tt = performance.now() / 1000, a = sf * sf * 0.004 + st.skid * 0.005;
+        cam.rotateX(Math.sin(tt * 37) * a + Math.sin(tt * 23.3) * a * 0.6);
+        cam.rotateY(Math.sin(tt * 29.1) * a * 0.7);
+      }
+    }
+    this.visualTail(dt, this.skier.position);
+  }
+  visualTail(dt, P) {
+    const cam = this.camera;
+    // 影はスキーヤー周辺だけ高解像度で
+    this.sun.position.set(P.x + this.sunDir.x * 120, P.y + this.sunDir.y * 120, P.z + this.sunDir.z * 120);
+    this.sun.shadow.camera.updateProjectionMatrix();
+    this.sun.target.position.copy(P);
+    this.sky.position.copy(cam.position);
+    this.updateFlakes(dt);
+    const live = (this.mode === 'run' || this.mode === 'done') && !this.paused;
+    this.fxF = (this.fxF || 0) + ((live ? (this.speedF || 0) : 0) - (this.fxF || 0)) * (1 - Math.exp(-dt * 4));
+    this.drawFx(this.paused ? 0 : dt, this.fxF);
+  }
+
+  hudData() {
+    const st = this.st, R = this.route, sg = R.def.segs[R.seg[st.i]];
+    return {
+      t: st.finished ? st.finishT : st.time,
+      kmh: Math.round(st.v * 3.6), alt: Math.round(this.T.h(st.x, st.z)), slope: Math.round(st.slopeDeg),
+      seg: sg.name, level: sg.level, prog: clamp(st.s / R.finishS, 0, 1),
+      remain: Math.max(0, Math.round(R.finishS - st.s)),
+    };
+  }
+  resultData() {
+    const st = this.st, R = this.route;
+    const avg = R.finishS / st.finishT;
+    let comment;
+    if (st.turns < R.finishS / 120) comment = 'ターンが少なめ。右→左→右とリズムよく荷重を切り替えると、スピードをコントロールしながら滑れます。';
+    else if (st.nets > 2) comment = 'ネットに何度か接触。ターンの切り替えを少し早めに、コース幅を広く使ってみましょう。';
+    else if (st.maxV * 3.6 > 70) comment = '攻めた滑り。ターンを深く（ホールドを長く）すると横向きの時間が増えて速度が落ちます。';
+    else comment = 'きれいなターン弧。ホールドを長く→エッジが立って深く曲がる、短く→浅く曲がる、の違いを試してみてください。';
+    return { time: st.finishT, maxKmh: Math.round(st.maxV * 3.6), avgKmh: Math.round(avg * 3.6), turns: st.turns, nets: st.nets, comment };
+  }
+
+  drawMinimap() {
+    const cv = document.getElementById('minimap'); if (!cv) return;
+    const g = cv.getContext('2d'), W = cv.width, H = cv.height, st = this.st, R = this.route, k = 0.55, y0 = H * 0.3;
+    g.clearRect(0, 0, W, H);
+    g.fillStyle = 'rgba(15,37,54,0.72)'; g.fillRect(0, 0, W, H);
+    g.fillStyle = 'rgba(241,246,250,0.22)';
+    for (let y = 0; y < H; y += 3) {
+      const s = st.s - (y - y0) / k; if (s < 0 || s > R.len) continue;
+      const i = Math.round(s / 2);
+      g.fillRect(W / 2 - R.hwL[i] * k, y, (R.hwL[i] + R.hwR[i]) * k, 3);
+    }
+    g.strokeStyle = 'rgba(159,185,206,0.5)'; g.setLineDash([3, 4]); g.beginPath(); g.moveTo(W / 2, 0); g.lineTo(W / 2, H); g.stroke(); g.setLineDash([]);
+    if (R.finishS - st.s < (H - y0) / k + 200) { const fy = y0 - (R.finishS - st.s) * k; g.fillStyle = '#E03A3E'; g.fillRect(W / 2 - 20, fy - 1, 40, 3); }
+    g.strokeStyle = '#F2C230'; g.lineWidth = 2; g.beginPath();
+    let started = false;
+    for (let i = this.trailN - 1; i >= 0; i--) {
+      const yy = y0 - (this.trailS[i] - st.s) * k; if (yy > H + 4) break;
+      const xx = W / 2 + this.trailD[i] * k;
+      started ? g.lineTo(xx, yy) : (g.moveTo(xx, yy), started = true);
+    }
+    g.stroke();
+    g.save(); g.translate(W / 2 + st.d * k, y0); g.rotate(wrapA(st.phi - R.psi[st.i]));
+    g.fillStyle = '#fff'; g.beginPath(); g.moveTo(0, -6); g.lineTo(4, 4); g.lineTo(-4, 4); g.closePath(); g.fill();
+    g.restore();
+    g.fillStyle = 'rgba(241,246,250,0.6)'; g.font = '9px sans-serif'; g.fillText('↑谷', 4, 11);
+  }
+}
+// スキーヤーモデルの向き補正（板を -z 方向へ）
+// 元モデルはジャンプ姿勢で板が斜めなので、板の向き（トップ側）を水平な進行方向へ回す
+const SKIER_FIX = { tip: [0.094, 0.76, -0.64], roll: 0 };
+
+/* ================= 素材の読み込み ================= */
+function loadImage(url) {
+  return new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = () => rej(new Error(url)); i.src = url; });
+}
+function b64ToBuffer(b64) {
+  const bin = atob(b64), u8 = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+  return u8.buffer;
+}
+async function loadAssets(progress) {
+  let done = 0; const total = 7;
+  const tick = (msg) => { done++; progress(done / total, msg); };
+  const glb = (name, label) => fetch(ASSET + name).then(r => { if (!r.ok) throw new Error(name); return r.json(); })
+    .then(j => new Promise((res, rej) => {
+      // GLB内の画像は <img> で読む（ImageBitmapLoader は fetch(blob:) を使い、アーティファクトのCSPで止められるため）
+      const cib = window.createImageBitmap;
+      try { window.createImageBitmap = undefined; new THREE.GLTFLoader().parse(b64ToBuffer(j.data), '', res, e => rej(new Error(name + ': ' + (e?.message || e)))); }
+      finally { window.createImageBitmap = cib; }
+    })).then(v => (tick(label), v));
+  const [meta, bin, snowImg, normImg, skier, chair, pole] = await Promise.all([
+    fetch(ASSET + 'goryu-course.json').then(r => { if (!r.ok) throw new Error('course'); return r.json(); }).then(v => (tick('コースデータ'), v)),
+    fetch(ASSET + 'goryu-terrain.json').then(r => { if (!r.ok) throw new Error('terrain'); return r.json(); }).then(j => b64ToBuffer(j.data)).then(v => (tick('標高データ'), v)),
+    loadImage(ASSET + 'snow-diffuse.jpg').then(v => (tick('雪テクスチャ'), v)),
+    loadImage(ASSET + 'snow-normal.jpg').then(v => (tick('雪の凹凸'), v)),
+    glb('skier.json', 'スキーヤー'),
+    glb('chairlift.json', 'リフト').catch(e => { console.warn(e); tick('リフト（簡易表示）'); return null; }),
+    glb('liftpole.json', 'リフト支柱').catch(e => { console.warn(e); tick('支柱（簡易表示）'); return null; }),
+  ]);
+  return { meta, bin, snowImg, normImg, skier, chair, pole };
+}
+
+/* ================= Vue UI ================= */
+const { createApp, reactive, ref, computed, onMounted, markRaw, shallowRef } = Vue;
+function loadBest() { try { return JSON.parse(localStorage.getItem('goryu-best-v2') || '{}'); } catch (e) { return {}; } }
+function saveBest(b) { try { localStorage.setItem('goryu-best-v2', JSON.stringify(b)); } catch (e) {} }
+
+createApp({
+  setup() {
+    const screen = ref('loading'), runId = ref('cruise'), paused = ref(false), countdown = ref(0);
+    const load = reactive({ p: 0, msg: 'データを読み込み中…', err: '' });
+    const liftUi = reactive({ active: false, phase: '', name: '', gondola: false, remain: 0 });
+    const reducedMotion = REDUCED;
+    const runs = shallowRef([]);
+    const hud = reactive({ t: 0, kmh: 0, alt: 0, slope: 0, seg: '', level: '', prog: 0, remain: 0 });
+    const input = reactive({ L: false, R: false });
+    const toast = ref(null), result = reactive({}), best = reactive(loadBest());
+    const turnHint = ref(''), pushFlash = ref(false); let pushTimer;
+    const hapticsOn = ref(Haptics.on);
+    const toggleHaptics = (v) => { Haptics.set(v); hapticsOn.value = v; if (v) Haptics.pulse(20, true); };
+    const currentRun = computed(() => runs.value.find(r => r.id === runId.value) || { segs: [] });
+    const slopePoly = computed(() => { const h = Math.min(38, 54 * Math.tan(hud.slope * DEG)); return `2,${40 - h} 56,40 2,40`; });
+    const slopeColor = computed(() => hud.slope >= 28 ? '#15171A' : hud.slope >= 20 ? '#E03A3E' : hud.slope >= 13 ? '#C98A1B' : '#2E9E5B');
+    const slopeLabel = computed(() => hud.slope >= 28 ? '急斜面' : hud.slope >= 20 ? '中急斜面' : hud.slope >= 13 ? '中斜面' : '緩斜面');
+    let engine, toastTimer, wakeLock;
+    const pointers = new Map(), kb = { L: false, R: false, B: false };
+
+    const fmtTime = (t) => { t = t || 0; const m = Math.floor(t / 60), s = t - m * 60; return `${m}:${s < 10 ? '0' : ''}${s.toFixed(1)}`; };
+    const syncInput = () => {
+      let L = kb.L, R = kb.R;
+      for (const side of pointers.values()) side === 'L' ? (L = true) : (R = true);
+      if (kb.B) L = R = true;
+      input.L = L; input.R = R;
+      if (engine) { engine.input.L = L; engine.input.R = R; }
+    };
+    const swipes = new Map();
+    const doPush = () => { if (engine?.push()) { Haptics.pulse(18, true); pushFlash.value = true; clearTimeout(pushTimer); pushTimer = setTimeout(() => pushFlash.value = false, 280); } };
+    const onMove = (ev) => {
+      const s0 = swipes.get(ev.pointerId); if (!s0) return;
+      if (s0.y - ev.clientY > 40 && performance.now() - s0.t < 450) {   // 上スワイプ＝ストックで漕ぐ（その指のホールドは解除）
+        swipes.delete(ev.pointerId); pointers.delete(ev.pointerId); syncInput(); doPush();
+      }
+    };
+    const onPointer = (ev, down) => {
+      if (liftUi.active) { if (down) { engine?.tapLift(); Haptics.pulse(25, true); } return; }
+      if (down) Haptics.pulse(8, true);
+      if (down) swipes.set(ev.pointerId, { y: ev.clientY, t: performance.now() }); else swipes.delete(ev.pointerId);
+      if (down) { pointers.set(ev.pointerId, ev.clientX < innerWidth / 2 ? 'L' : 'R'); ev.target.setPointerCapture?.(ev.pointerId); }
+      else pointers.delete(ev.pointerId);
+      syncInput();
+    };
+    const keymap = { ArrowLeft: 'L', KeyF: 'L', ArrowRight: 'R', KeyJ: 'R', ArrowDown: 'B', Space: 'B' };
+    addEventListener('keydown', e => { if (screen.value === 'play' && !liftUi.active && (e.code === 'ArrowUp' || e.code === 'KeyW')) { e.preventDefault(); if (!e.repeat) doPush(); return; } const k = keymap[e.code]; if (screen.value === 'play' && liftUi.active && (k || e.code === 'Enter')) { e.preventDefault(); if (!e.repeat) engine?.tapLift(); return; } if (k && screen.value === 'play') { kb[k] = true; syncInput(); e.preventDefault(); } if (e.code === 'Escape' && screen.value === 'play') togglePause(); });
+    addEventListener('keyup', e => { const k = keymap[e.code]; if (k) { kb[k] = false; syncInput(); } });
+    addEventListener('blur', () => { pointers.clear(); kb.L = kb.R = kb.B = false; syncInput(); });
+    document.addEventListener('visibilitychange', () => { if (document.hidden && screen.value === 'play' && !paused.value) togglePause(); });
+
+    const selectRun = (r) => { runId.value = r.id; engine.load(r); engine.mode = 'idle'; };
+    const requestWake = async () => { try { wakeLock = await navigator.wakeLock?.request('screen'); } catch (e) {} };
+    const skipLift = () => engine?.skipLift();
+    const startRun = () => { pointers.clear(); syncInput(); screen.value = 'play'; paused.value = false; engine.startRun(); requestWake(); };
+    const restart = () => { liftUi.active = false; engine.load(currentRun.value); startRun(); };
+    const toMenu = () => { screen.value = 'menu'; paused.value = false; liftUi.active = false; engine.setPaused(false); engine.load(currentRun.value); engine.mode = 'idle'; };
+    const togglePause = () => { paused.value = !paused.value; engine.setPaused(paused.value); pointers.clear(); syncInput(); };
+
+    onMounted(async () => {
+      let assets;
+      try {
+        assets = await loadAssets((p, msg) => { load.p = p; load.msg = msg + ' 読み込み完了'; });
+      } catch (e) { load.err = 'データを読み込めませんでした（' + (e?.message || e) + '）。ページを再読み込みしてください。'; return; }
+      load.msg = '地形を組み立て中…';
+      await new Promise(r => setTimeout(r, 30));
+      runs.value = assets.meta.routes.map(r => ({ ...r, segs: r.segs.map((s, i) => ({ ...s, span: (r.segStart[i + 1] ?? r.x.length) - r.segStart[i] })) }));
+      engine = markRaw(new Engine(document.getElementById('gl'), assets, {
+        hud: (d) => Object.assign(hud, d),
+        countdown: (n) => { countdown.value = n; },
+        go: () => { countdown.value = 0; toast.value = { name: 'GO!', level: '計測スタート' }; clearTimeout(toastTimer); toastTimer = setTimeout(() => toast.value = null, 900); },
+        lift: (d) => {
+          Object.assign(liftUi, d);
+          const msg = d.phase === 'early' ? { name: 'まだ降りられません', level: '降り場まで待って' } : d.phase === 'missed' ? { name: '降り損ねた！', level: 'もう一度チャンス' } : null;
+          if (msg) { toast.value = msg; clearTimeout(toastTimer); toastTimer = setTimeout(() => toast.value = null, 1300); }
+        },
+        segment: (sg) => { toast.value = sg; clearTimeout(toastTimer); toastTimer = setTimeout(() => toast.value = null, 2600); },
+        net: () => { toast.value = { name: 'ネット接触！', level: 'コース外に注意' }; clearTimeout(toastTimer); toastTimer = setTimeout(() => toast.value = null, 1200); },
+        gauges: (pl, pr, e) => {
+          const gl = document.getElementById('gaugeL'), gr = document.getElementById('gaugeR');
+          if (gl) gl.style.height = (pl * 100) + '%';
+          if (gr) gr.style.height = (pr * 100) + '%';
+          const h = Math.min(pl, pr) > 0.5 ? 'ブレーキ' : e > 0.15 ? '右ターン ↱' : e < -0.15 ? '↰ 左ターン' : '';
+          if (turnHint.value !== h) turnHint.value = h;
+        },
+        finish: (r) => {
+          const prev = best[runId.value];
+          r.isBest = !prev || r.time < prev;
+          if (r.isBest) { best[runId.value] = r.time; saveBest({ ...best }); }
+          Object.keys(result).forEach(k => delete result[k]);
+          Object.assign(result, r);
+          screen.value = 'result';
+          try { wakeLock?.release(); } catch (e) {}
+        },
+      }));
+      window.__engine = engine;
+      engine.load(currentRun.value);
+      screen.value = 'menu';
+    });
+
+    return { hapticsOn, toggleHaptics, onMove, pushFlash, liftUi, reducedMotion, skipLift, screen, load, runs, runId, currentRun, hud, slopePoly, slopeColor, slopeLabel, input, toast, result, best, paused, countdown, turnHint,
+      levelBg, fmtTime, onPointer, selectRun, startRun, restart, toMenu, togglePause };
+  }
+}).mount('#app');
+</script>
+
+<script>
+if ('serviceWorker' in navigator) addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+</script>
+</body>
+</html>

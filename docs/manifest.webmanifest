@@ -1,0 +1,26 @@
+{
+  "name": "五竜ダウンヒル",
+  "short_name": "五竜ダウンヒル",
+  "description": "白馬五竜の実地形を滑るスキー。右足荷重で左ターン。",
+  "start_url": "./",
+  "scope": "./",
+  "display": "fullscreen",
+  "orientation": "portrait",
+  "background_color": "#0F2536",
+  "theme_color": "#0F2536",
+  "lang": "ja",
+  "icons": [
+    {
+      "src": "icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
