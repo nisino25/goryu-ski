@@ -1,5 +1,5 @@
-// 五竜ダウンヒル service worker（版: 051b30e6）
-const CACHE = 'goryu-051b30e6';
+// 五竜ダウンヒル service worker（版: e7effe08）
+const CACHE = 'goryu-e7effe08';
 const CORE = ['./', 'index.html', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png',
   'assets/goryu-course.json', 'assets/goryu-terrain.json', 'assets/skier.json', 'assets/chairlift.json',
   'assets/liftpole.json', 'assets/snow-diffuse.jpg', 'assets/snow-normal.jpg'];
