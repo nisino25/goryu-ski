@@ -99,6 +99,11 @@
           <span class="shrink-0 w-4 h-4 rounded-sm border border-white/40" :style="{background: levelBg(hud.level)}"></span>
           <span class="font-bold text-[13px] truncate">{{ hud.seg }}</span>
         </div>
+        <div v-if="hud.gTotal" class="glass rounded-md px-2.5 py-1 flex items-center gap-2 f-num text-[15px]">
+          <span class="inline-flex gap-0.5"><i class="block w-1.5 h-3 bg-[#d7263d]"></i><i class="block w-1.5 h-3 bg-[#1f5fbf]"></i></span>
+          <span>旗門 {{ hud.gPass }}/{{ hud.gTotal }}</span>
+          <span v-if="hud.gMiss" class="text-[#ff8a95]">ミス {{ hud.gMiss }}（+{{ hud.gMiss * 2 }}秒）</span>
+        </div>
         <div class="glass rounded-md px-2.5 py-2 flex flex-col gap-1.5">
           <div class="flex items-end gap-4">
             <div>
@@ -131,7 +136,7 @@
     </div>
 
     <!-- 進行バー -->
-    <div v-show="!liftUi.active" class="absolute inset-x-3" style="top: calc(env(safe-area-inset-top,0px) + 252px)">
+    <div v-show="!liftUi.active" class="absolute inset-x-3" :style="{ top: `calc(env(safe-area-inset-top,0px) + ${hud.gTotal ? 290 : 252}px)` }">
       <div class="relative h-1.5 rounded-full overflow-hidden flex bg-white/10">
         <div v-for="s in currentRun.segs" :key="s.name" :style="{flex: s.span, background: levelBg(s.level)}" class="opacity-70 border-r border-[color:var(--navy)]"></div>
       </div>
@@ -175,7 +180,7 @@
         <div class="text-[11px] leading-tight text-white/80 pb-1">左足<br><span class="text-white/55">→右ターン</span></div>
       </div>
       <div class="flex flex-col items-center pb-1 min-w-[110px]">
-        <div class="f-num text-2xl font-bold text-center" :class="pushFlash || turnHint ? 'text-[color:var(--gold)]' : 'text-white/40'">{{ pushFlash ? '漕ぐ！' : (turnHint || 'まっすぐ') }}</div>
+        <div class="f-num text-2xl font-bold text-center" :class="gateFlash || pushFlash || turnHint ? 'text-[color:var(--gold)]' : 'text-white/40'">{{ gateFlash ? 'ナイス旗門！' : pushFlash ? '漕ぐ！' : (turnHint || 'まっすぐ') }}</div>
         <div class="text-[11px] text-white/60">↑スワイプで加速</div>
       </div>
       <div class="flex items-end gap-2">
@@ -214,11 +219,15 @@
             <span>{{ r.length.toLocaleString() }}m</span>
             <span>標高差 {{ r.topAlt - r.botAlt }}m</span>
             <span>最大 {{ r.maxSlope }}°</span>
-            <span class="ml-auto text-[color:var(--gold)]">BEST {{ best[r.id] ? fmtTime(best[r.id]) : '--:--.-' }}</span>
+            <span class="ml-auto text-[color:var(--gold)]">BEST {{ best[bestKey(r.id)] ? fmtTime(best[bestKey(r.id)]) : '--:--.-' }}</span>
           </div>
         </button>
       </div>
-      <button @click="startRun" class="rounded-xl py-4 text-lg font-black bg-[color:var(--red)] shadow-lg">滑走開始</button>
+      <label for="slalom" class="flex items-center justify-between rounded-lg border border-white/15 px-3 py-2.5 text-[13px]">
+        <span class="flex items-center gap-2"><span class="inline-flex gap-0.5"><i class="block w-2 h-3.5 bg-[#d7263d]"></i><i class="block w-2 h-3.5 bg-[#1f5fbf]"></i></span>旗門スラローム<span class="text-[11px] text-white/50">外すと +2秒</span></span>
+        <input id="slalom" type="checkbox" class="w-5 h-5 accent-[color:var(--gold)]" :checked="gatesOn" @change="toggleGates($event.target.checked)">
+      </label>
+      <button @click="startRun" class="rounded-xl py-4 text-lg font-black bg-[color:var(--red)] shadow-lg">{{ gatesOn ? 'スラロームで滑走開始' : '滑走開始' }}</button>
       <label for="haptics" class="flex items-center justify-between rounded-lg border border-white/15 px-3 py-2.5 text-[13px]">
         <span>振動（ターン・漕ぐ・ネット）<span class="block text-[11px] text-white/50">Androidは常時。iPhoneは iOS 18以降・タップ時のみ</span></span>
         <input id="haptics" type="checkbox" class="w-5 h-5 accent-[color:var(--gold)]" :checked="hapticsOn" @change="toggleHaptics($event.target.checked)">
@@ -248,6 +257,7 @@
         <div><div class="text-[11px] text-[color:var(--ice)]">平均速度</div><div class="f-num text-2xl font-bold">{{ result.avgKmh }} km/h</div></div>
         <div><div class="text-[11px] text-[color:var(--ice)]">ターン数</div><div class="f-num text-2xl font-bold">{{ result.turns }}</div></div>
         <div><div class="text-[11px] text-[color:var(--ice)]">ネット接触</div><div class="f-num text-2xl font-bold">{{ result.nets }}</div></div>
+        <div v-if="result.gTotal" class="col-span-2"><div class="text-[11px] text-[color:var(--ice)]">旗門</div><div class="f-num text-2xl font-bold">{{ result.gPass }}/{{ result.gTotal }}<span v-if="result.gMiss" class="text-[#ff8a95] text-lg ml-2">ミス {{ result.gMiss }}（+{{ result.penalty }}秒）</span><span v-else class="text-[color:var(--gold)] text-lg ml-2">パーフェクト</span></div></div>
       </div>
       <p class="text-[13px] text-white/75 leading-relaxed">{{ result.comment }}</p>
       <div class="flex gap-2">
@@ -933,7 +943,7 @@ class Engine {
       this.startI = bi;
     }
     this.sinkNearUnder(R);
-    this.buildPiste(); this.buildNets(); this.buildSigns(); this.buildTrail();
+    this.buildPiste(); this.buildNets(); this.buildGates(); this.buildSigns(); this.buildTrail();
     this.reset();
   }
   pisteCols(i) {
@@ -993,6 +1003,43 @@ class Engine {
       const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(arr, 3));
       this.routeGroup.add(new THREE.Line(g, new THREE.LineBasicMaterial({ color: 0xff7a1a })));
     }
+  }
+  /* ---------- 旗門（スラローム）：赤青交互、2本のポールの間を通過する ---------- */
+  buildGates() {
+    this.gates = [];
+    if (!this.gatesOn) return;
+    const R = this.route, T = this.T, p = this.tmp, GW = 5;
+    const start = (this.startI || 6) + 25, end = Math.round(R.finishS / 2) - 8;
+    let side = 1;
+    for (let i = start; i < end; i += 14) {                    // 約28m間隔
+      const room = side > 0 ? R.hwR[i] : R.hwL[i];
+      const off = side * Math.max(0, Math.min(room * 0.4, 12, room - GW / 2 - 2));
+      this.gates.push({ i, s: i * 2, d: off, blue: side < 0, state: 0 });
+      side = -side;
+    }
+    const n = this.gates.length;
+    if (!n) return;
+    const poleGeo = new THREE.CylinderGeometry(0.03, 0.03, 1.8, 6); poleGeo.translate(0, 0.9, 0);
+    const flagGeo = new THREE.PlaneGeometry(0.75, 0.55); flagGeo.translate(0, 1.3, 0);
+    const poles = new THREE.InstancedMesh(poleGeo, new THREE.MeshLambertMaterial({ color: 0xffffff }), n * 2);
+    const flags = new THREE.InstancedMesh(flagGeo, new THREE.MeshLambertMaterial({ color: 0xffffff, side: THREE.DoubleSide }), n * 2);
+    const m = new THREE.Matrix4(), q = new THREE.Quaternion(), sc = new THREE.Vector3(1, 1, 1), v = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0);
+    const red = new THREE.Color('#d7263d'), blue = new THREE.Color('#1f5fbf');
+    this.gates.forEach((g, k) => {
+      const ps = R.psi[g.i];
+      q.setFromAxisAngle(up, -ps);
+      for (const sgn of [-1, 1]) {
+        const j = k * 2 + (sgn > 0 ? 1 : 0), d = g.d + sgn * GW / 2;
+        R.point(g.i, d, T, p);
+        v.set(p.x, p.y + 0.2, p.z); m.compose(v, q, sc); poles.setMatrixAt(j, m);
+        R.point(g.i, d + sgn * 0.4, T, p);                      // 旗はポールの外側に付ける
+        v.set(p.x, R.point(g.i, d, T, this.tmp2).y + 0.2, p.z); m.compose(v, q, sc); flags.setMatrixAt(j, m);
+        poles.setColorAt(j, g.blue ? blue : red); flags.setColorAt(j, g.blue ? blue : red);
+      }
+    });
+    poles.frustumCulled = flags.frustumCulled = false;
+    poles.castShadow = true;
+    this.routeGroup.add(poles, flags);
   }
   signTexture(lines, bg, stripe) {
     const c = document.createElement('canvas'); c.width = 512; c.height = 256;
@@ -1059,11 +1106,13 @@ class Engine {
   reset() {
     const R = this.route, i0 = this.startI || 6;
     this.st = { x: R.x[i0], z: R.z[i0], phi: R.psi[i0], v: 1.5, i: i0, s: i0 * 2, d: 0, th: 0, pL: 0, pR: 0, e: 0, omega: 0, lean: 0,
+      gi: 0, gPass: 0, gMiss: 0, penalty: 0,
       time: 0, maxV: 0, turns: 0, side: 0, nets: 0, seg: -1, finished: false, finishT: 0, finishT2: 0, trailAcc: 0, skid: 0, slopeDeg: 0 };
     const g0 = this.T.grad(R.x[i0], R.z[i0], this.g2); this.st.slopeDeg = Math.atan(Math.hypot(g0[0], g0[1])) / DEG;
     this.trailN = 0; this.trailGeo.setDrawRange(0, 0);
     this.camYaw = R.psi[i0]; this.camInit = false;
     this.pLife.fill(0);
+    for (const g of this.gates || []) g.state = 0;
     this.skier.visible = true; if (this.contact) this.contact.visible = true;
     this.chairAway = false; this.dropT = undefined;
     if (this.rideChair) this.rideChair.visible = this.rideCabin.visible = false;
@@ -1114,7 +1163,7 @@ class Engine {
     const ai = Math.min(R.N - 1, this.startI + 35);
     st.aim = { x: R.x[ai], z: R.z[ai] };    // 最初のターンだけ自動でコース方向へ
     this.dropH = (P.y - (this.lift.gondola ? 4.05 : this.seatDrop)) - (this.T.h(st.x, st.z) + 0.25); this.dropT = 0;
-    this.chairAway = true;
+    this.chairAway = false; this.rideChair.visible = this.rideCabin.visible = false;   // 降りたら乗っていた搬器は消す（カメラをふさがない）
     this.skier.visible = true; this.contact.visible = true;
     this.camYaw = h;
     this.mode = 'run';
@@ -1224,6 +1273,13 @@ class Engine {
     if (seg !== st.seg && !st.finished) { st.seg = seg; this.cb.segment(R.def.segs[seg]); }
     if (!st.finished) {
       st.time += dt;
+      const gt = this.gates && this.gates[st.gi];
+      if (gt && st.s >= gt.s) {
+        const ok = Math.abs(st.d - gt.d) <= 2.5 + 0.35;
+        gt.state = ok ? 1 : 2; st.gi++;
+        if (ok) { st.gPass++; Haptics.pulse(12); } else { st.gMiss++; st.penalty += 2; Haptics.pulse([30, 40, 30]); }
+        this.cb.gate?.(ok);
+      }
       if (st.s >= R.finishS) { st.finished = true; st.finishT = st.time; Haptics.pulse([40, 60, 40]); }
     } else st.finishT2 += dt;
     // エッジが立って高速で曲がっている間は細かく振動（Androidのみ）
@@ -1351,7 +1407,8 @@ class Engine {
   hudData() {
     const st = this.st, R = this.route, sg = R.def.segs[R.seg[st.i]];
     return {
-      t: st.finished ? st.finishT : st.time,
+      t: (st.finished ? st.finishT : st.time) + st.penalty,
+      gTotal: this.gates.length, gPass: st.gPass, gMiss: st.gMiss,
       kmh: Math.round(st.v * 3.6), alt: Math.round(this.T.h(st.x, st.z)), slope: Math.round(st.slopeDeg),
       seg: sg.name, level: sg.level, prog: clamp(st.s / R.finishS, 0, 1),
       remain: Math.max(0, Math.round(R.finishS - st.s)),
@@ -1361,11 +1418,13 @@ class Engine {
     const st = this.st, R = this.route;
     const avg = R.finishS / st.finishT;
     let comment;
-    if (st.turns < R.finishS / 120) comment = 'ターンが少なめ。右→左→右とリズムよく荷重を切り替えると、スピードをコントロールしながら滑れます。';
+    if (this.gates.length && st.gMiss > this.gates.length * 0.2) comment = '旗門ミスが多め。次の旗門の少し手前でターンを始める（早めに荷重を切り替える）と、ラインが間に合います。';
+    else if (this.gates.length && st.gMiss === 0) comment = '旗門パーフェクト！ 次はホールドを短めにして、旗門の近くを通るタイトなラインでタイムを縮めてみましょう。';
+    else if (st.turns < R.finishS / 120) comment = 'ターンが少なめ。右→左→右とリズムよく荷重を切り替えると、スピードをコントロールしながら滑れます。';
     else if (st.nets > 2) comment = 'ネットに何度か接触。ターンの切り替えを少し早めに、コース幅を広く使ってみましょう。';
     else if (st.maxV * 3.6 > 70) comment = '攻めた滑り。ターンを深く（ホールドを長く）すると横向きの時間が増えて速度が落ちます。';
     else comment = 'きれいなターン弧。ホールドを長く→エッジが立って深く曲がる、短く→浅く曲がる、の違いを試してみてください。';
-    return { time: st.finishT, maxKmh: Math.round(st.maxV * 3.6), avgKmh: Math.round(avg * 3.6), turns: st.turns, nets: st.nets, comment };
+    return { gTotal: this.gates.length, gPass: st.gPass, gMiss: st.gMiss, penalty: st.penalty, time: st.finishT + st.penalty, maxKmh: Math.round(st.maxV * 3.6), avgKmh: Math.round(avg * 3.6), turns: st.turns, nets: st.nets, comment };
   }
 
   drawMinimap() {
@@ -1392,6 +1451,13 @@ class Engine {
     g.save(); g.translate(W / 2 + st.d * k, y0); g.rotate(wrapA(st.phi - R.psi[st.i]));
     g.fillStyle = '#fff'; g.beginPath(); g.moveTo(0, -6); g.lineTo(4, 4); g.lineTo(-4, 4); g.closePath(); g.fill();
     g.restore();
+    for (const gt of this.gates) {
+      const yy = y0 - (gt.s - st.s) * k; if (yy < -4 || yy > H + 4) continue;
+      g.fillStyle = gt.state === 2 ? 'rgba(150,160,170,0.8)' : gt.blue ? '#4f8df0' : '#ef4b5c';
+      if (gt.state === 1) g.globalAlpha = 0.35;
+      g.fillRect(W / 2 + (gt.d - 2.5) * k - 1.5, yy - 1.5, 3, 3); g.fillRect(W / 2 + (gt.d + 2.5) * k - 1.5, yy - 1.5, 3, 3);
+      g.globalAlpha = 1;
+    }
     g.fillStyle = 'rgba(241,246,250,0.6)'; g.font = '9px sans-serif'; g.fillText('↑谷', 4, 11);
   }
 }
@@ -1442,11 +1508,18 @@ createApp({
     const liftUi = reactive({ active: false, phase: '', name: '', gondola: false, remain: 0 });
     const reducedMotion = REDUCED;
     const runs = shallowRef([]);
-    const hud = reactive({ t: 0, kmh: 0, alt: 0, slope: 0, seg: '', level: '', prog: 0, remain: 0 });
+    const hud = reactive({ t: 0, kmh: 0, alt: 0, slope: 0, seg: '', level: '', prog: 0, remain: 0, gTotal: 0, gPass: 0, gMiss: 0 });
     const input = reactive({ L: false, R: false });
     const toast = ref(null), result = reactive({}), best = reactive(loadBest());
     const turnHint = ref(''), pushFlash = ref(false); let pushTimer;
     const hapticsOn = ref(Haptics.on);
+    const gatesOn = ref((() => { try { return localStorage.getItem('goryu-slalom') !== 'off'; } catch (e) { return true; } })());
+    const bestKey = (id) => id + (gatesOn.value ? ':gates' : '');
+    const gateFlash = ref(false); let gateTimer;
+    const toggleGates = (v) => {
+      gatesOn.value = v; try { localStorage.setItem('goryu-slalom', v ? 'on' : 'off'); } catch (e) {}
+      if (engine) { engine.gatesOn = v; engine.load(currentRun.value); engine.mode = 'idle'; }
+    };
     const toggleHaptics = (v) => { Haptics.set(v); hapticsOn.value = v; if (v) Haptics.pulse(20, true); };
     const hapticsNote = ref({ vibrate: 'この端末は振動に対応（Android）', ios: 'iPhone：指を離した瞬間に軽く振動', 'ios-old': 'iOS 18 未満のため振動できません', none: 'この端末・ブラウザは振動に非対応' }[Haptics.kind]);
     const testHaptics = () => {
@@ -1517,6 +1590,10 @@ createApp({
       engine = markRaw(new Engine(document.getElementById('gl'), assets, {
         hud: (d) => Object.assign(hud, d),
         countdown: (n) => { countdown.value = n; },
+        gate: (ok) => {
+          if (ok) { gateFlash.value = true; clearTimeout(gateTimer); gateTimer = setTimeout(() => gateFlash.value = false, 450); }
+          else { toast.value = { name: '旗門ミス +2秒', level: 'スラローム' }; clearTimeout(toastTimer); toastTimer = setTimeout(() => toast.value = null, 1100); }
+        },
         go: () => { countdown.value = 0; toast.value = { name: 'GO!', level: '計測スタート' }; clearTimeout(toastTimer); toastTimer = setTimeout(() => toast.value = null, 900); },
         lift: (d) => {
           Object.assign(liftUi, d);
@@ -1533,9 +1610,9 @@ createApp({
           if (turnHint.value !== h) turnHint.value = h;
         },
         finish: (r) => {
-          const prev = best[runId.value];
+          const key = bestKey(runId.value), prev = best[key];
           r.isBest = !prev || r.time < prev;
-          if (r.isBest) { best[runId.value] = r.time; saveBest({ ...best }); }
+          if (r.isBest) { best[key] = r.time; saveBest({ ...best }); }
           Object.keys(result).forEach(k => delete result[k]);
           Object.assign(result, r);
           screen.value = 'result';
@@ -1543,11 +1620,12 @@ createApp({
         },
       }));
       window.__engine = engine;
+      engine.gatesOn = gatesOn.value;
       engine.load(currentRun.value);
       screen.value = 'menu';
     });
 
-    return { hapticsNote, testHaptics, hapticsOn, toggleHaptics, onMove, pushFlash, liftUi, reducedMotion, skipLift, screen, load, runs, runId, currentRun, hud, slopePoly, slopeColor, slopeLabel, input, toast, result, best, paused, countdown, turnHint,
+    return { gatesOn, toggleGates, bestKey, gateFlash, hapticsNote, testHaptics, hapticsOn, toggleHaptics, onMove, pushFlash, liftUi, reducedMotion, skipLift, screen, load, runs, runId, currentRun, hud, slopePoly, slopeColor, slopeLabel, input, toast, result, best, paused, countdown, turnHint,
       levelBg, fmtTime, onPointer, selectRun, startRun, restart, toMenu, togglePause };
   }
 }).mount('#app');
