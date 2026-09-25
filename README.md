@@ -30,7 +30,8 @@ git add -A && git commit -m "Update" && git push
 ## 出典・ライセンス
 
 - 標高：国土地理院（基盤地図情報 数値標高モデル）
-- コース線・リフト：© OpenStreetMap contributors（ODbL）
+- とおみゲレンデの幅・森の配置：国土地理院 シームレス空中写真（地理院タイル）から判定
+- コース線・リフト・建物：© OpenStreetMap contributors（ODbL）
 - コース名・公式の距離と斜度：エイブル白馬五竜 コースガイド
 - スキーヤー：自作の関節付きモデル（プログラムで生成）
 - リフト「Chairlift」「Ski lift pole」by Poly by Google — CC-BY 3.0（Poly Pizza）

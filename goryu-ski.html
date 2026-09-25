@@ -18,6 +18,7 @@
   }
   [v-cloak] { display: none; }
   html, body { height: 100%; }
+  *, *::before, *::after { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
   body {
     background: var(--navy);
     color: var(--snow);
@@ -65,7 +66,7 @@
   </div>
 
   <!-- ===== タッチ入力レイヤー（左右半分） ===== -->
-  <div v-show="screen==='play'" class="touch-layer absolute inset-0 flex pointer-events-auto"
+  <div v-show="screen==='play'" class="touch-layer absolute inset-0 flex pointer-events-auto" @touchstart.prevent @touchmove.prevent
        @pointerdown="onPointer($event,true)" @pointerup="onPointer($event,false)"
        @pointercancel="onPointer($event,false)" @pointerleave="onPointer($event,false)" @pointermove="onMove"
        @contextmenu.prevent>
@@ -136,7 +137,7 @@
     </div>
 
     <!-- 進行バー -->
-    <div v-show="!liftUi.active" class="absolute inset-x-3" :style="{ top: `calc(env(safe-area-inset-top,0px) + ${hud.gTotal ? 290 : 252}px)` }">
+    <div v-show="!liftUi.active" class="absolute inset-x-3" style="top: calc(env(safe-area-inset-top,0px) + 3px)">
       <div class="relative h-1.5 rounded-full overflow-hidden flex bg-white/10">
         <div v-for="s in currentRun.segs" :key="s.name" :style="{flex: s.span, background: levelBg(s.level)}" class="opacity-70 border-r border-[color:var(--navy)]"></div>
       </div>
@@ -242,7 +243,7 @@
       </div>
       <div class="text-[11px] leading-relaxed text-white/50 flex flex-col gap-1">
         <p>距離・標高差・最大斜度は実地形での実測値。看板の「公式」値はエイブル白馬五竜のコースガイドより。コース線はOpenStreetMapのデータをつないだもので、区間の境目はおおよそです。PCは ← / → キー（左足 / 右足）、↓ でブレーキ、↑ で漕いで加速。</p>
-        <p>出典：標高 国土地理院（数値標高モデル）／ コース・リフト © OpenStreetMap contributors (ODbL)／ リフト「Chairlift」「Ski lift pole」by Poly by Google, CC-BY 3.0 (Poly Pizza)／ 雪テクスチャ Poly Haven (CC0)</p>
+        <p>出典：標高・空中写真 国土地理院／ コース・リフト・建物 © OpenStreetMap contributors (ODbL)／ リフト「Chairlift」「Ski lift pole」by Poly by Google, CC-BY 3.0 (Poly Pizza)／ 雪テクスチャ Poly Haven (CC0)</p>
       </div>
     </div>
   </div>
@@ -332,19 +333,20 @@ class Route {
       this.seg[i] = s;
     }
     // 幅をなめらかに、カーブ内側は曲率半径で制限（メッシュの折れ返り防止）
-    const wRaw = Float32Array.from({ length: N }, (_, i) => def.segs[this.seg[i]].width);
-    const w = new Float32Array(N);
-    for (let i = 0; i < N; i++) { let s = 0, n = 0; for (let k = -15; k <= 15; k++) { const j = i + k; if (j >= 0 && j < N) { s += wRaw[j]; n++; } } w[i] = s / n; }
+    // 左右の半幅：航空写真で実測した値があればそれ（とおみゲレンデ）、なければ区間の標準幅
+    const rawL = Float32Array.from({ length: N }, (_, i) => def.hwL && def.hwL[i] > 0 ? def.hwL[i] : def.segs[this.seg[i]].width / 2);
+    const rawR = Float32Array.from({ length: N }, (_, i) => def.hwR && def.hwR[i] > 0 ? def.hwR[i] : def.segs[this.seg[i]].width / 2);
+    const wL = new Float32Array(N), wR = new Float32Array(N);
+    for (let i = 0; i < N; i++) { let a = 0, b = 0, n = 0; for (let k = -15; k <= 15; k++) { const j = i + k; if (j >= 0 && j < N) { a += rawL[j]; b += rawR[j]; n++; } } wL[i] = a / n; wR[i] = b / n; }
     const curv = new Float32Array(N);
     for (let i = 0; i < N; i++) { const a = Math.max(0, i - 4), b = Math.min(N - 1, i + 4); curv[i] = wrapA(this.psi[b] - this.psi[a]) / Math.max(2, (b - a) * 2); }
     for (let i = 0; i < N; i++) {
       let k = 0; for (let d = -6; d <= 6; d++) { const j = clamp(i + d, 0, N - 1); if (Math.abs(curv[j]) > Math.abs(k)) k = curv[j]; }
       const R = Math.abs(k) > 1e-5 ? 1 / Math.abs(k) : 1e5;
       const inner = Math.max(8, 0.85 * R - 3);
-      const hw = w[i] / 2;
       // k>0 = 右カーブ → 曲率中心は右側
-      this.hwR[i] = k > 0 ? Math.min(hw, inner) : hw;
-      this.hwL[i] = k < 0 ? Math.min(hw, inner) : hw;
+      this.hwR[i] = k > 0 ? Math.min(wR[i], inner) : wR[i];
+      this.hwL[i] = k < 0 ? Math.min(wL[i], inner) : wL[i];
       this.exR[i] = k > 0 ? Math.max(this.hwR[i] + 4, Math.min(this.hwR[i] + 18, 0.9 * R)) : this.hwR[i] + 18;
       this.exL[i] = k < 0 ? Math.max(this.hwL[i] + 4, Math.min(this.hwL[i] + 18, 0.9 * R)) : this.hwL[i] + 18;
     }
@@ -399,7 +401,7 @@ class Sfx {
       };
       this.wind = mk('lowpass', 400, 0.7);
       this.glide = mk('bandpass', 1400, 0.5);        // 板が雪面をすべる「シャーッ」
-      this.carve = mk('bandpass', 2600, 3.5);        // エッジが雪を削る鋭い音
+      this.carve = mk('lowpass', 1100, 0.4);         // エッジで雪を押す柔らかい「ザーッ」（笛のような鋭い音は出さない）
       // ずれ・ハの字：高域ノイズを細かく震わせてガリガリ感を出す
       this.skidAM = ctx.createGain(); this.skidAM.gain.value = 0.5; this.skidAM.connect(this.master);
       this.skid = mk('highpass', 1100, 0.7, this.skidAM);
@@ -416,8 +418,8 @@ class Sfx {
     this.wind.f.frequency.setTargetAtTime(250 + vv * 40, t, 0.1);
     this.glide.g.gain.setTargetAtTime(active ? sp * 0.1 * (1 - ae * 0.5) : 0, t, 0.08);
     this.glide.f.frequency.setTargetAtTime(900 + vv * 45, t, 0.1);
-    this.carve.g.gain.setTargetAtTime(active ? Math.pow(ae, 1.4) * sp * 0.2 : 0, t, 0.05);
-    this.carve.f.frequency.setTargetAtTime(1800 + ae * 1600 + vv * 25, t, 0.08);
+    this.carve.g.gain.setTargetAtTime(active ? Math.pow(ae, 1.6) * sp * 0.09 : 0, t, 0.12);
+    this.carve.f.frequency.setTargetAtTime(700 + ae * 400 + vv * 12, t, 0.15);
     const sk = active ? Math.min(0.32, skid * 0.35 + plow * Math.min(1, vv / 10) * 0.25) : 0;
     this.skid.g.gain.setTargetAtTime(sk, t, 0.05);
     this.lfo.frequency.setTargetAtTime(24 + vv * 1.2, t, 0.1);
@@ -692,7 +694,7 @@ class Engine {
       tree: new THREE.MeshLambertMaterial({ vertexColors: true }),
     };
 
-    this.buildFar(); this.buildNear(); this.buildTrees(); this.buildLifts();
+    this.buildFar(); this.buildNear(); this.buildTrees(); this.buildLifts(); this.buildBuildings();
     this.makeSkier(); this.makeParticles(); this.makeFlakes();
     this.fx = document.getElementById('fx'); this.fxg = this.fx.getContext('2d');
     this.lines = Array.from({ length: 36 }, () => this.newLine(true));
@@ -945,6 +947,29 @@ class Engine {
     board.position.set(-(sep / 2 + 2.6), deckY + 2.4, -8); board.rotation.y = Math.PI; g.add(board);
     box(0.1, 2.4, 0.1, -(sep / 2 + 2.6), deckY + 1.2, -7.95, mats.dark);
     this.scene.add(g);
+  }
+  /* ---------- 建物（OSMの外形）：エスカルプラザなどベースの建物 ---------- */
+  buildBuildings() {
+    const list = this.meta.buildings || [];
+    if (!list.length) return;
+    const wall = new THREE.MeshLambertMaterial({ color: 0xd9d2c3 }), roofM = new THREE.MeshLambertMaterial({ color: 0x5a4a42 }), plaza = new THREE.MeshLambertMaterial({ color: 0xe9e4da });
+    for (const b of list) {
+      const shape = new THREE.Shape();
+      for (let i = 0; i < b.p.length; i += 2) (i ? shape.lineTo(b.p[i], -b.p[i + 1]) : shape.moveTo(b.p[i], -b.p[i + 1]));
+      const body = new THREE.ExtrudeGeometry(shape, { depth: b.h, bevelEnabled: false });
+      body.rotateX(-Math.PI / 2); body.translate(0, b.y, 0);
+      const m = new THREE.Mesh(body, b.name ? plaza : wall); m.castShadow = true; m.receiveShadow = true;
+      this.scene.add(m);
+      const roof = new THREE.ExtrudeGeometry(shape, { depth: 0.8, bevelEnabled: false });
+      roof.rotateX(-Math.PI / 2); roof.translate(0, b.y + b.h, 0);
+      this.scene.add(new THREE.Mesh(roof, roofM));
+      if (b.name) {   // 名前のある建物には看板
+        const tex = this.signTexture([[b.name, 88, 150]], '#0F2536', ['#E03A3E']);
+        let cx = 0, cz = 0; for (let i = 0; i < b.p.length; i += 2) { cx += b.p[i]; cz += b.p[i + 1]; } cx /= b.p.length / 2; cz /= b.p.length / 2;
+        const sign = new THREE.Mesh(new THREE.PlaneGeometry(12, 6), new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide, toneMapped: false }));
+        sign.position.set(cx, b.y + b.h + 4, cz); sign.rotation.y = Math.PI / 2 - 0.3; this.scene.add(sign);
+      }
+    }
   }
   // GLB内の全メッシュを1つのジオメトリに焼き込む（インスタンス描画で大量に並べるため）
   bakeGLB(gltf) {
@@ -1442,8 +1467,8 @@ class Engine {
     }
     if (st.s >= R.len - 2) st.v = Math.min(st.v, 0.5);
     // ターンの切り替え：新しいターンの内側のストックを突く
-    if (e > 0.55 && st.side !== 1) { if (st.side) st.turns++; st.side = 1; this.rig.plant(1); this.sfx.blip('plant'); if (v > 5) this.sfx.blip('swoosh'); }
-    if (e < -0.55 && st.side !== -1) { if (st.side) st.turns++; st.side = -1; this.rig.plant(-1); this.sfx.blip('plant'); if (v > 5) this.sfx.blip('swoosh'); }
+    if (e > 0.55 && st.side !== 1) { if (st.side) st.turns++; st.side = 1; this.rig.plant(1); this.sfx.blip('plant'); }
+    if (e < -0.55 && st.side !== -1) { if (st.side) st.turns++; st.side = -1; this.rig.plant(-1); this.sfx.blip('plant'); }
     st.maxV = Math.max(st.maxV, st.v);
     const seg = R.seg[st.i];
     if (seg !== st.seg && !st.finished) { st.seg = seg; this.cb.segment(R.def.segs[seg]); }
@@ -1557,9 +1582,9 @@ class Engine {
     } else {
       this.camYaw = this.camInit ? lerpAngle(this.camYaw, h, 1 - Math.exp(-dt * 3.8)) : h;
       const sf = this.speedF = clamp((st.v * 3.6 - 45) / 60, 0, 1);
-      const back = 3.6 - sf * 0.3, low = sf * 0.3;
+      const back = 4.6 - sf * 0.3, low = sf * 0.3;
       const cx = st.x - Math.sin(this.camYaw) * back, cz = st.z + Math.cos(this.camYaw) * back;
-      const ty = Math.max(T.h(cx, cz) + 0.9, y + 1.9 - low * 0.5);   // 急斜面でもカメラが高く離れすぎない
+      const ty = Math.max(T.h(cx, cz) + 1.0, y + 2.3 - low * 0.5);   // 急斜面でもカメラが高く離れすぎない
       if (!this.camInit) { cam.position.set(cx, ty, cz); this.camInit = true; }
       const k = 1 - Math.exp(-dt * 14);
       cam.position.x += (cx - cam.position.x) * k; cam.position.y += (ty - cam.position.y) * k; cam.position.z += (cz - cam.position.z) * k;
