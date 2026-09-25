@@ -223,6 +223,10 @@
         <span>振動（ターン・漕ぐ・ネット）<span class="block text-[11px] text-white/50">Androidは常時。iPhoneは iOS 18以降・タップ時のみ</span></span>
         <input id="haptics" type="checkbox" class="w-5 h-5 accent-[color:var(--gold)]" :checked="hapticsOn" @change="toggleHaptics($event.target.checked)">
       </label>
+      <div class="flex items-center gap-3 -mt-2">
+        <button @click="testHaptics" class="rounded-lg px-3 py-2 text-[13px] font-bold bg-white/10">振動テスト</button>
+        <span class="text-[11px] text-white/60 leading-snug">{{ hapticsNote }}</span>
+      </div>
       <div class="text-[11px] leading-relaxed text-white/50 flex flex-col gap-1">
         <p>距離・標高差・最大斜度は実地形での実測値。看板の「公式」値はエイブル白馬五竜のコースガイドより。コース線はOpenStreetMapのデータをつないだもので、区間の境目はおおよそです。PCは ← / → キー（左足 / 右足）、↓ でブレーキ、↑ で漕いで加速。</p>
         <p>出典：標高 国土地理院（数値標高モデル）／ コース・リフト © OpenStreetMap contributors (ODbL)／ スキーヤー「Skier」by apelab・リフト「Chairlift」「Ski lift pole」by Poly by Google, CC-BY 3.0 (Poly Pizza)／ 雪テクスチャ Poly Haven (CC0)</p>
@@ -391,25 +395,29 @@ class Sfx {
 }
 
 /* ================= 触覚フィードバック ================= */
-// Android: Vibration API。iPhone(iOS 18+): <input switch> を押すとシステムの軽い触覚が鳴る仕組みを利用（タッチ操作の直後のみ有効）
+// Android: Vibration API（最初のタップ以降いつでも鳴らせる）。
+// iPhone(iOS 18+): Vibration API が無いので、<input type=checkbox switch> をクリックしたときのシステム触覚を利用。
+//   ただし「ユーザー操作の最中」しか鳴らない。タッチでは指を離した瞬間（pointerup/touchend）が操作の扱いになるので、そこで鳴らす。
+const IOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const IOS_VER = (() => { const m = navigator.userAgent.match(/OS (\d+)_(\d+)/); return m ? parseFloat(m[1] + '.' + m[2]) : 0; })();
 const Haptics = {
   on: (() => { try { return localStorage.getItem('goryu-haptics') !== 'off'; } catch (e) { return true; } })(),
-  el: null,
+  kind: typeof navigator.vibrate === 'function' ? 'vibrate' : (IOS && IOS_VER >= 18 ? 'ios' : (IOS ? 'ios-old' : 'none')),
   set(v) { this.on = v; try { localStorage.setItem('goryu-haptics', v ? 'on' : 'off'); } catch (e) {} },
-  ios() {
-    if (this.el) return this.el;
+  iosTick() {
     try {
-      const lab = document.createElement('label'), inp = document.createElement('input');
-      inp.type = 'checkbox'; inp.setAttribute('switch', ''); lab.appendChild(inp);
-      lab.style.cssText = 'position:fixed;left:-200px;top:0;opacity:0;pointer-events:none';
-      document.body.appendChild(lab); this.el = lab;
+      const label = document.createElement('label'), input = document.createElement('input');
+      label.setAttribute('aria-hidden', 'true'); label.style.display = 'none';
+      input.type = 'checkbox'; input.setAttribute('switch', '');
+      label.appendChild(input); document.head.appendChild(label);
+      label.click(); label.remove();
     } catch (e) {}
-    return this.el;
   },
+  // gesture=true はユーザー操作イベントの中から呼ぶとき（iPhoneはこのときだけ鳴る）
   pulse(ms = 10, gesture = false) {
     if (!this.on) return;
-    try { if (navigator.vibrate && navigator.vibrate(ms)) return; } catch (e) {}
-    if (gesture) try { this.ios()?.click(); } catch (e) {}
+    if (this.kind === 'vibrate') { try { navigator.vibrate(ms); } catch (e) {} return; }
+    if (gesture && this.kind === 'ios') this.iosTick();
   },
 };
 
@@ -1440,6 +1448,13 @@ createApp({
     const turnHint = ref(''), pushFlash = ref(false); let pushTimer;
     const hapticsOn = ref(Haptics.on);
     const toggleHaptics = (v) => { Haptics.set(v); hapticsOn.value = v; if (v) Haptics.pulse(20, true); };
+    const hapticsNote = ref({ vibrate: 'この端末は振動に対応（Android）', ios: 'iPhone：指を離した瞬間に軽く振動', 'ios-old': 'iOS 18 未満のため振動できません', none: 'この端末・ブラウザは振動に非対応' }[Haptics.kind]);
+    const testHaptics = () => {
+      if (!Haptics.on) { hapticsNote.value = '振動がオフになっています'; return; }
+      Haptics.pulse(Haptics.kind === 'vibrate' ? [30, 60, 30] : 20, true);
+      if (Haptics.kind === 'ios') hapticsNote.value = '鳴らなければ：設定 > サウンドと触覚 > システムの触覚 をオン';
+      else if (Haptics.kind === 'vibrate') hapticsNote.value = '鳴らなければ：端末の「タッチ操作バイブ」設定を確認';
+    };
     const currentRun = computed(() => runs.value.find(r => r.id === runId.value) || { segs: [] });
     const slopePoly = computed(() => { const h = Math.min(38, 54 * Math.tan(hud.slope * DEG)); return `2,${40 - h} 56,40 2,40`; });
     const slopeColor = computed(() => hud.slope >= 28 ? '#15171A' : hud.slope >= 20 ? '#E03A3E' : hud.slope >= 13 ? '#C98A1B' : '#2E9E5B');
@@ -1456,7 +1471,8 @@ createApp({
       if (engine) { engine.input.L = L; engine.input.R = R; }
     };
     const swipes = new Map();
-    const doPush = () => { if (engine?.push()) { Haptics.pulse(18, true); pushFlash.value = true; clearTimeout(pushTimer); pushTimer = setTimeout(() => pushFlash.value = false, 280); } };
+    let iosTickOnRelease = false;
+    const doPush = () => { if (engine?.push()) { Haptics.pulse(18); iosTickOnRelease = true; pushFlash.value = true; clearTimeout(pushTimer); pushTimer = setTimeout(() => pushFlash.value = false, 280); } };
     const onMove = (ev) => {
       const s0 = swipes.get(ev.pointerId); if (!s0) return;
       if (s0.y - ev.clientY > 40 && performance.now() - s0.t < 450) {   // 上スワイプ＝ストックで漕ぐ（その指のホールドは解除）
@@ -1464,8 +1480,13 @@ createApp({
       }
     };
     const onPointer = (ev, down) => {
-      if (liftUi.active) { if (down) { engine?.tapLift(); Haptics.pulse(25, true); } return; }
-      if (down) Haptics.pulse(8, true);
+      // iPhone: 指を離した瞬間に鳴らす（押した瞬間はブラウザが「操作」と認めないため）
+      if (!down && ev.type === 'pointerup' && Haptics.kind === 'ios') {
+        if (liftUi.active || iosTickOnRelease || pointers.has(ev.pointerId) || swipes.has(ev.pointerId)) Haptics.pulse(10, true);
+        iosTickOnRelease = false;
+      }
+      if (liftUi.active) { if (down) { engine?.tapLift(); Haptics.pulse(25); } return; }
+      if (down) Haptics.pulse(8, ev.pointerType === 'mouse');
       if (down) swipes.set(ev.pointerId, { y: ev.clientY, t: performance.now() }); else swipes.delete(ev.pointerId);
       if (down) { pointers.set(ev.pointerId, ev.clientX < innerWidth / 2 ? 'L' : 'R'); ev.target.setPointerCapture?.(ev.pointerId); }
       else pointers.delete(ev.pointerId);
@@ -1526,7 +1547,7 @@ createApp({
       screen.value = 'menu';
     });
 
-    return { hapticsOn, toggleHaptics, onMove, pushFlash, liftUi, reducedMotion, skipLift, screen, load, runs, runId, currentRun, hud, slopePoly, slopeColor, slopeLabel, input, toast, result, best, paused, countdown, turnHint,
+    return { hapticsNote, testHaptics, hapticsOn, toggleHaptics, onMove, pushFlash, liftUi, reducedMotion, skipLift, screen, load, runs, runId, currentRun, hud, slopePoly, slopeColor, slopeLabel, input, toast, result, best, paused, countdown, turnHint,
       levelBg, fmtTime, onPointer, selectRun, startRun, restart, toMenu, togglePause };
   }
 }).mount('#app');
